@@ -3,6 +3,26 @@ const path = require('path');
 
 let logFilePath;
 
+/** In-memory tail for the Settings “Troubleshooting” panel (no secrets). */
+const SETTINGS_LOG_MAX = 100;
+const settingsLogLines = [];
+
+function getLogPath() {
+  return logFilePath;
+}
+
+function getSettingsLogLines() {
+  return [...settingsLogLines];
+}
+
+/** Logs to stderr, ai-usage-debug.log, and the settings troubleshooting buffer. */
+function logSettings(...args) {
+  const line = `[${new Date().toISOString()}] ${args.map(formatArg).join(' ')}`;
+  settingsLogLines.push(line);
+  while (settingsLogLines.length > SETTINGS_LOG_MAX) settingsLogLines.shift();
+  log(...args);
+}
+
 function init(app) {
   logFilePath = path.join(app.getPath('userData'), 'ai-usage-debug.log');
   const header = `\n--- ${new Date().toISOString()} pid=${process.pid} ---\n`;
@@ -58,4 +78,12 @@ function installProcessHandlers() {
   process.on('unhandledRejection', (reason) => logError('unhandledRejection', reason));
 }
 
-module.exports = { init, log, logError, installProcessHandlers };
+module.exports = {
+  init,
+  log,
+  logSettings,
+  logError,
+  installProcessHandlers,
+  getLogPath,
+  getSettingsLogLines,
+};

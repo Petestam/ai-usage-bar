@@ -4,6 +4,16 @@
 // The billing endpoints (/dashboard/billing/*) return spend data.
 
 const axios = require('axios');
+const debug = require('../debug');
+
+function formatFetchError(e) {
+  const status = e.response?.status;
+  const st = e.response?.statusText;
+  if (status) return `HTTP ${status}${st ? ` ${st}` : ''}`;
+  const code = e.code;
+  if (code) return `${code}: ${e.message || e}`;
+  return e.message || String(e);
+}
 
 class OpenAIProvider {
   constructor(store) {
@@ -82,15 +92,19 @@ class OpenAIProvider {
         changeRate:   this.changeRate,
         lastFetched:  now,
         error:        null,
+        errorDetail:  null,
       };
     } catch (e) {
       const status = e.response?.status;
+      const detail = formatFetchError(e);
+      debug.logSettings('OpenAI fetch failed:', detail);
       return {
-        service:     'openai',
-        label:       'OpenAI',
-        error:       (status === 401 || status === 403) ? 'auth_expired' : (e.message || 'fetch_failed'),
-        lastFetched: Date.now(),
-        changeRate:  0,
+        service:      'openai',
+        label:        'OpenAI',
+        error:        (status === 401 || status === 403) ? 'auth_expired' : (e.message || 'fetch_failed'),
+        errorDetail:  detail,
+        lastFetched:  Date.now(),
+        changeRate:   0,
       };
     }
   }

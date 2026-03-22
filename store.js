@@ -29,6 +29,10 @@ class Store {
     this._save();
   }
 
+  getConfigPath() {
+    return this.configPath;
+  }
+
   getAll() {
     return { ...this._data };
   }

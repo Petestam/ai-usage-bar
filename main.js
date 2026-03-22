@@ -129,12 +129,66 @@ ipcMain.handle('get-config', () => store.getAll());
 
 ipcMain.handle('set-config', (_, incoming) => {
   const merged = { ...store.getAll(), ...incoming };
+
+  if ('claude_org_uuid' in incoming) {
+    const v = incoming.claude_org_uuid;
+    if (v && String(v).trim()) {
+      merged.claude_org_uuid = String(v).trim();
+    } else {
+      delete merged.claude_org_uuid;
+    }
+  }
+
+  // New session key → drop saved org so we do not reuse the wrong org; user can re-add org ID after.
+  if (incoming.claude_session_key) {
+    delete merged.claude_org_uuid;
+  }
+
+  debug.logSettings('set-config', {
+    claude_session_key: incoming.claude_session_key
+      ? `${incoming.claude_session_key.includes(';') ? 'cookie header' : 'session key'} (length ${incoming.claude_session_key.length})`
+      : 'unchanged',
+    claude_org_uuid: incoming.claude_org_uuid !== undefined
+      ? merged.claude_org_uuid || '(cleared)'
+      : 'unchanged',
+    openai_api_key: incoming.openai_api_key
+      ? `updated (length ${incoming.openai_api_key.length})`
+      : 'unchanged',
+    openai_manual_limit: incoming.openai_manual_limit !== undefined
+      ? incoming.openai_manual_limit
+      : 'unchanged',
+  });
   store.setAll(merged);
-  // Reset cached org UUID so Claude re-discovers on next poll.
+
   if (poller) {
-    poller.claude.orgUuid = null;
+    if (incoming.claude_session_key) {
+      poller.claude.orgUuid = null;
+    } else if ('claude_org_uuid' in incoming) {
+      poller.claude.orgUuid = merged.claude_org_uuid || null;
+    }
     poller.restart();
   }
+});
+
+ipcMain.handle('get-settings-diagnostics', () => {
+  const st = poller?.getState() || {};
+  const svc = (s) =>
+    s
+      ? {
+          error: s.error,
+          errorDetail: s.errorDetail,
+          lastFetched: s.lastFetched,
+        }
+      : null;
+  return {
+    configPath: store?.getConfigPath(),
+    debugLogPath: debug.getLogPath(),
+    logLines: debug.getSettingsLogLines(),
+    services: {
+      claude: svc(st.claude),
+      openai: svc(st.openai),
+    },
+  };
 });
 
 ipcMain.handle('refresh', async () => {
@@ -144,6 +198,10 @@ ipcMain.handle('refresh', async () => {
 
 ipcMain.handle('resize', (_, height) => {
   if (mb.window) mb.window.setSize(320, height);
+});
+
+ipcMain.handle('quit-app', () => {
+  app.quit();
 });
 
 // Prevent quitting when all windows close (menubar convention).

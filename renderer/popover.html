@@ -201,6 +201,73 @@ body {
 }
 .save-btn:hover { background: #0071E3; }
 .save-btn:active { background: #005EC4; }
+
+.quit-btn {
+  width: 100%;
+  background: transparent;
+  color: #FF453A;
+  border: 1px solid #48484A;
+  border-radius: 7px;
+  padding: 7px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  margin-top: 10px;
+  transition: background 0.12s, border-color 0.12s;
+}
+.quit-btn:hover { background: #3A2020; border-color: #FF453A; }
+.quit-btn:active { background: #4A2828; }
+
+.troubleshoot {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid #2C2C2E;
+}
+.troubleshoot-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: #8E8E93;
+  margin-bottom: 6px;
+}
+.troubleshoot-paths {
+  font-size: 10px;
+  color: #636366;
+  line-height: 1.45;
+  margin-bottom: 8px;
+  word-break: break-all;
+}
+.troubleshoot-pre {
+  width: 100%;
+  max-height: 110px;
+  overflow: auto;
+  margin: 0 0 8px;
+  padding: 8px;
+  background: #0C0C0E;
+  border: 1px solid #3A3A3C;
+  border-radius: 6px;
+  font-size: 10px;
+  line-height: 1.4;
+  color: #AEAEB2;
+  font-family: 'SF Mono', Menlo, monospace;
+  white-space: pre-wrap;
+  user-select: text;
+}
+.troubleshoot-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.troubleshoot-btn {
+  flex: 1;
+  background: #2C2C2E;
+  color: #FFFFFF;
+  border: 1px solid #3A3A3C;
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.troubleshoot-btn:hover { background: #3A3A3C; }
 </style>
 </head>
 <body>
@@ -246,8 +313,14 @@ body {
   <form class="settings-body" id="settingsForm" action="#">
     <div class="field">
       <label>Claude Session Key</label>
-      <input type="password" id="claudeKey" placeholder="Paste your sessionKey cookie" autocomplete="off" spellcheck="false"/>
-      <div class="field-hint">claude.ai → DevTools → Application → Cookies → sessionKey</div>
+      <input type="password" id="claudeKey" placeholder="sessionKey or full Cookie header" autocomplete="off" spellcheck="false"/>
+      <div class="field-hint">Best: Network → request → Request Headers → <strong>cookie</strong>. If you copy from Application → Cookies, include the whole row — the app strips extra fields like Domain/expires/Path. Or paste only the token after <strong>sessionKey=</strong>.</div>
+    </div>
+
+    <div class="field">
+      <label>Claude organization ID (optional)</label>
+      <input type="text" id="claudeOrgId" placeholder="65768ad3-eabd-42a9-8f4f-c2f76322ca0a" autocomplete="off" spellcheck="false"/>
+      <div class="field-hint">From the usage URL: …/organizations/<strong>&lt;uuid&gt;</strong>/usage — only if auto-detection fails.</div>
     </div>
 
     <div class="field">
@@ -264,6 +337,18 @@ body {
 
     <button type="submit" class="save-btn" id="saveBtn">Save &amp; Refresh</button>
     <div class="field-hint" style="margin-top:8px;text-align:center;">Press <strong>Enter</strong> or click the button — the <strong>←</strong> back arrow does not save.</div>
+
+    <button type="button" class="quit-btn" id="quitBtn">Quit app</button>
+
+    <div class="troubleshoot">
+      <div class="troubleshoot-title">Troubleshooting</div>
+      <div class="troubleshoot-paths" id="troubleshootPaths"></div>
+      <pre class="troubleshoot-pre" id="settingsTroubleshoot" aria-label="Diagnostics log"></pre>
+      <div class="troubleshoot-actions">
+        <button type="button" class="troubleshoot-btn" id="refreshDiagnosticsBtn">Refresh log</button>
+        <button type="button" class="troubleshoot-btn" id="copyDiagnosticsBtn">Copy all</button>
+      </div>
+    </div>
   </form>
 </div>
 
@@ -401,10 +486,54 @@ function resize(h) {
 
 // ── Settings view ─────────────────────────────────────────────────────────────
 
-function showSettings() {
+function formatDiagnostics(d) {
+  const lines = [];
+  const c = d.services?.claude;
+  const o = d.services?.openai;
+  if (c) {
+    lines.push(
+      `Claude: ${c.error ? `error=${c.error}` : 'ok'}${c.errorDetail ? ` | ${c.errorDetail}` : ''}`
+    );
+  } else lines.push('Claude: (not configured)');
+  if (o) {
+    lines.push(
+      `OpenAI: ${o.error ? `error=${o.error}` : 'ok'}${o.errorDetail ? ` | ${o.errorDetail}` : ''}`
+    );
+  } else lines.push('OpenAI: (not configured)');
+  if (d.logLines?.length) {
+    lines.push('');
+    lines.push('--- Recent log ---');
+    lines.push(...d.logLines);
+  } else {
+    lines.push('');
+    lines.push('(No log lines yet — save settings or refresh usage.)');
+  }
+  return lines.join('\n');
+}
+
+async function refreshSettingsDiagnostics() {
+  const d = await ipcRenderer.invoke('get-settings-diagnostics');
+  const pathsEl = document.getElementById('troubleshootPaths');
+  const pre = document.getElementById('settingsTroubleshoot');
+  pathsEl.innerHTML = '';
+  if (d.configPath) {
+    const a = document.createElement('div');
+    a.textContent = `Config: ${d.configPath}`;
+    pathsEl.appendChild(a);
+  }
+  if (d.debugLogPath) {
+    const b = document.createElement('div');
+    b.textContent = `Debug log: ${d.debugLogPath}`;
+    pathsEl.appendChild(b);
+  }
+  pre.textContent = formatDiagnostics(d);
+  resize(520);
+}
+
+async function showSettings() {
   document.getElementById('mainView').classList.add('hidden');
   document.getElementById('settingsView').classList.add('visible');
-  resize(280);
+  await refreshSettingsDiagnostics();
 }
 
 function showMain() {
@@ -432,12 +561,49 @@ document.getElementById('refreshBtn').addEventListener('click', async () => {
 document.getElementById('settingsBtn').addEventListener('click', showSettings);
 document.getElementById('backBtn').addEventListener('click', showMain);
 
+document.getElementById('quitBtn').addEventListener('click', () => {
+  ipcRenderer.invoke('quit-app');
+});
+
+document.getElementById('refreshDiagnosticsBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('refreshDiagnosticsBtn');
+  btn.disabled = true;
+  try {
+    await ipcRenderer.invoke('refresh');
+    await refreshSettingsDiagnostics();
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+document.getElementById('copyDiagnosticsBtn').addEventListener('click', async () => {
+  const d = await ipcRenderer.invoke('get-settings-diagnostics');
+  const header = [
+    d.configPath ? `Config: ${d.configPath}` : '',
+    d.debugLogPath ? `Debug log: ${d.debugLogPath}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n');
+  const text = [header, '', formatDiagnostics(d)].filter(Boolean).join('\n');
+  try {
+    await navigator.clipboard.writeText(text);
+    const btn = document.getElementById('copyDiagnosticsBtn');
+    const prev = btn.textContent;
+    btn.textContent = 'Copied';
+    setTimeout(() => { btn.textContent = prev; }, 1500);
+  } catch (e) {
+    console.error(e);
+  }
+});
+
 async function saveSettingsAndClose() {
   const incoming = {};
   const sk = document.getElementById('claudeKey').value.trim();
   const ak = document.getElementById('openaiKey').value.trim();
   const lm = document.getElementById('openaiLimit').value.trim();
+  const orgId = document.getElementById('claudeOrgId').value.trim();
   if (sk && sk !== '••••••••') incoming.claude_session_key = sk;
+  incoming.claude_org_uuid = orgId;
   if (ak && ak !== '••••••••') incoming.openai_api_key     = ak;
   if (lm) incoming.openai_manual_limit = parseFloat(lm);
   await ipcRenderer.invoke('set-config', incoming);
@@ -447,6 +613,7 @@ async function saveSettingsAndClose() {
     currentState = state;
     updateTimestamp(state);
   }
+  await refreshSettingsDiagnostics();
   showMain();
   render(currentState);
 }
@@ -470,6 +637,7 @@ document.getElementById('settingsForm').addEventListener('submit', (e) => {
 
   // Pre-fill settings fields if keys exist (masked)
   if (config.claude_session_key) document.getElementById('claudeKey').value = '••••••••';
+  if (config.claude_org_uuid) document.getElementById('claudeOrgId').value = config.claude_org_uuid;
   if (config.openai_api_key)     document.getElementById('openaiKey').value = '••••••••';
   if (config.openai_manual_limit) document.getElementById('openaiLimit').value = config.openai_manual_limit;
 
