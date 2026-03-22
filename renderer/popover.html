@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif;
+  background: #1C1C1E;
+  color: #FFFFFF;
+  font-size: 13px;
+  -webkit-app-region: no-drag;
+  user-select: none;
+  overflow: hidden;
+}
+
+/* ── Header ─────────────────────────────────────────── */
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 14px 8px;
+}
+
+.header-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: #636366;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+
+.header-actions { display: flex; gap: 6px; align-items: center; }
+
+.icon-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #636366;
+  padding: 3px;
+  display: flex;
+  align-items: center;
+  border-radius: 4px;
+  transition: color 0.12s, background 0.12s;
+}
+.icon-btn:hover { color: #FFFFFF; background: #2C2C2E; }
+.icon-btn.spinning svg { animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Service cards ───────────────────────────────────── */
+.service-card {
+  padding: 10px 14px 12px;
+  border-top: 1px solid #2C2C2E;
+}
+
+.service-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 9px;
+}
+
+.service-name { font-size: 13px; font-weight: 600; }
+
+.service-detail {
+  font-size: 11px;
+  color: #8E8E93;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Progress rows ───────────────────────────────────── */
+.progress-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 3px;
+}
+
+.progress-label {
+  font-size: 11px;
+  color: #636366;
+  width: 52px;
+  flex-shrink: 0;
+}
+
+.bar-bg {
+  flex: 1;
+  height: 4px;
+  background: #3A3A3C;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.6s ease;
+}
+
+.fill-green  { background: #34C759; }
+.fill-amber  { background: #FF9500; }
+.fill-red    { background: #FF3B30; }
+
+.progress-pct {
+  font-size: 11px;
+  color: #8E8E93;
+  width: 30px;
+  text-align: right;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.reset-label {
+  font-size: 10px;
+  color: #48484A;
+  padding-left: 60px;
+  margin-bottom: 6px;
+  line-height: 1.4;
+}
+
+/* ── Error state ─────────────────────────────────────── */
+.error-badge {
+  font-size: 11px;
+  font-weight: 500;
+}
+.error-badge.auth  { color: #FF3B30; }
+.error-badge.other { color: #FF9500; }
+
+/* ── Empty / unconfigured ────────────────────────────── */
+.empty {
+  padding: 22px 14px;
+  text-align: center;
+  color: #48484A;
+  font-size: 12px;
+  line-height: 1.6;
+  border-top: 1px solid #2C2C2E;
+}
+.empty a { color: #0A84FF; cursor: pointer; text-decoration: none; }
+.empty a:hover { text-decoration: underline; }
+
+/* ── Footer ──────────────────────────────────────────── */
+.footer {
+  padding: 7px 14px;
+  border-top: 1px solid #2C2C2E;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.footer-ts { font-size: 10px; color: #3A3A3C; font-variant-numeric: tabular-nums; }
+
+/* ── Settings view ───────────────────────────────────── */
+#settingsView { display: none; }
+#settingsView.visible { display: block; }
+#mainView.hidden { display: none; }
+
+.settings-body { padding: 0 14px 14px; }
+
+.field { margin-bottom: 11px; }
+
+.field label {
+  display: block;
+  font-size: 11px;
+  color: #8E8E93;
+  margin-bottom: 4px;
+}
+
+.field input {
+  width: 100%;
+  background: #2C2C2E;
+  border: 1px solid #3A3A3C;
+  border-radius: 6px;
+  padding: 6px 8px;
+  color: #FFFFFF;
+  font-size: 12px;
+  font-family: 'SF Mono', 'Menlo', monospace;
+  outline: none;
+  transition: border-color 0.12s;
+}
+.field input:focus { border-color: #0A84FF; }
+
+.field-hint {
+  font-size: 10px;
+  color: #48484A;
+  margin-top: 3px;
+  line-height: 1.4;
+}
+
+.save-btn {
+  width: 100%;
+  background: #0A84FF;
+  color: #FFFFFF;
+  border: none;
+  border-radius: 7px;
+  padding: 7px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  margin-top: 6px;
+  transition: background 0.12s;
+}
+.save-btn:hover { background: #0071E3; }
+.save-btn:active { background: #005EC4; }
+</style>
+</head>
+<body>
+
+<!-- ── Main view ─────────────────────────────────────── -->
+<div id="mainView">
+  <div class="header">
+    <span class="header-title">AI Usage</span>
+    <div class="header-actions">
+      <button class="icon-btn" id="refreshBtn" title="Refresh">
+        <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+          <path d="M1 4v6h6"/><path d="M23 20v-6h-6"/>
+          <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/>
+        </svg>
+      </button>
+      <button class="icon-btn" id="settingsBtn" title="Settings">
+        <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <div id="servicesContainer"></div>
+
+  <div class="footer">
+    <span class="footer-ts" id="lastUpdated">—</span>
+  </div>
+</div>
+
+<!-- ── Settings view ──────────────────────────────────── -->
+<div id="settingsView">
+  <div class="header">
+    <span class="header-title">Settings</span>
+    <button class="icon-btn" id="backBtn" title="Back">
+      <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+        <polyline points="15 18 9 12 15 6"/>
+      </svg>
+    </button>
+  </div>
+
+  <form class="settings-body" id="settingsForm" action="#">
+    <div class="field">
+      <label>Claude Session Key</label>
+      <input type="password" id="claudeKey" placeholder="Paste your sessionKey cookie" autocomplete="off" spellcheck="false"/>
+      <div class="field-hint">claude.ai → DevTools → Application → Cookies → sessionKey</div>
+    </div>
+
+    <div class="field">
+      <label>OpenAI API Key</label>
+      <input type="password" id="openaiKey" placeholder="sk-…" autocomplete="off" spellcheck="false"/>
+      <div class="field-hint">platform.openai.com → API keys</div>
+    </div>
+
+    <div class="field">
+      <label>OpenAI Monthly Spend Limit (USD)</label>
+      <input type="number" id="openaiLimit" placeholder="20" min="1" max="9999" step="1"/>
+      <div class="field-hint">Used to calculate the % gauge. Set to match your OpenAI billing limit.</div>
+    </div>
+
+    <button type="submit" class="save-btn" id="saveBtn">Save &amp; Refresh</button>
+    <div class="field-hint" style="margin-top:8px;text-align:center;">Press <strong>Enter</strong> or click the button — the <strong>←</strong> back arrow does not save.</div>
+  </form>
+</div>
+
+<script>
+const { ipcRenderer } = require('electron');
+
+let currentState = {};
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function formatReset(date) {
+  if (!date) return null;
+  const d   = new Date(date);
+  const ms  = d - Date.now();
+  if (ms <= 0) return 'resetting…';
+  const h = Math.floor(ms / 3600000);
+  const m = Math.floor((ms % 3600000) / 60000);
+  if (h >= 24) { const days = Math.floor(h / 24); return `resets in ${days}d ${h % 24}h`; }
+  return h > 0 ? `resets in ${h}h ${m}m` : `resets in ${m}m`;
+}
+
+function fillClass(util) {
+  if (util >= 75) return 'fill-red';
+  if (util >= 50) return 'fill-amber';
+  return 'fill-green';
+}
+
+function progressRow(label, util) {
+  const pct = Math.round(util);
+  return `
+    <div class="progress-row">
+      <span class="progress-label">${label}</span>
+      <div class="bar-bg"><div class="bar-fill ${fillClass(util)}" style="width:${pct}%"></div></div>
+      <span class="progress-pct">${pct}%</span>
+    </div>`;
+}
+
+function resetLine(date) {
+  const str = formatReset(date);
+  return str ? `<div class="reset-label">${str}</div>` : '';
+}
+
+// ── Render ───────────────────────────────────────────────────────────────────
+
+function render(state) {
+  const container   = document.getElementById('servicesContainer');
+  const hasClaude   = !!state.claude;
+  const hasOpenAI   = !!state.openai;
+
+  if (!hasClaude && !hasOpenAI) {
+    container.innerHTML = `<div class="empty">No services configured.<br><a id="goSettings">Open Settings</a> to add your keys.</div>`;
+    document.getElementById('goSettings')?.addEventListener('click', showSettings);
+    resize(160);
+    return;
+  }
+
+  let html     = '';
+  let cardCount = 0;
+
+  if (hasClaude) {
+    cardCount++;
+    const c = state.claude;
+    if (c.error === 'auth_expired') {
+      html += `<div class="service-card">
+        <div class="service-header">
+          <span class="service-name">Claude</span>
+          <span class="error-badge auth">Session expired — update in Settings</span>
+        </div></div>`;
+    } else if (c.error) {
+      html += `<div class="service-card">
+        <div class="service-header">
+          <span class="service-name">Claude</span>
+          <span class="error-badge other">Connection error</span>
+        </div></div>`;
+    } else {
+      const fh = c.fiveHour || {};
+      const sd = c.sevenDay  || {};
+      html += `<div class="service-card">
+        <div class="service-header"><span class="service-name">Claude</span></div>
+        ${progressRow('5-hour', fh.utilization || 0)}
+        ${resetLine(fh.resetsAt)}
+        ${progressRow('Weekly', sd.utilization || 0)}
+        ${resetLine(sd.resetsAt)}
+      </div>`;
+    }
+  }
+
+  if (hasOpenAI) {
+    cardCount++;
+    const o = state.openai;
+    if (o.error === 'auth_expired') {
+      html += `<div class="service-card">
+        <div class="service-header">
+          <span class="service-name">OpenAI</span>
+          <span class="error-badge auth">Key invalid — update in Settings</span>
+        </div></div>`;
+    } else if (o.error) {
+      html += `<div class="service-card">
+        <div class="service-header">
+          <span class="service-name">OpenAI</span>
+          <span class="error-badge other">Connection error</span>
+        </div></div>`;
+    } else {
+      const spendStr = `$${(o.spendMtd || 0).toFixed(2)} / $${(o.spendLimit || 0).toFixed(0)}`;
+      html += `<div class="service-card">
+        <div class="service-header">
+          <span class="service-name">OpenAI</span>
+          <span class="service-detail">${spendStr}</span>
+        </div>
+        ${progressRow('Month', o.utilization || 0)}
+        ${resetLine(o.resetsAt)}
+      </div>`;
+    }
+  }
+
+  container.innerHTML = html;
+
+  // Resize window to fit content snugly (header=42 + footer=36 + card≈90 each)
+  const baseH = 42 + 36;
+  const cardH = cardCount === 1 ? 110 : 200;
+  resize(baseH + cardH);
+}
+
+function updateTimestamp(state) {
+  const el    = document.getElementById('lastUpdated');
+  const times = [state.claude?.lastFetched, state.openai?.lastFetched].filter(Boolean);
+  if (!times.length) { el.textContent = '—'; return; }
+  const ago = Math.round((Date.now() - Math.max(...times)) / 60000);
+  el.textContent = ago < 1 ? 'just now' : `${ago}m ago`;
+}
+
+function resize(h) {
+  ipcRenderer.invoke('resize', Math.round(h));
+}
+
+// ── Settings view ─────────────────────────────────────────────────────────────
+
+function showSettings() {
+  document.getElementById('mainView').classList.add('hidden');
+  document.getElementById('settingsView').classList.add('visible');
+  resize(280);
+}
+
+function showMain() {
+  document.getElementById('settingsView').classList.remove('visible');
+  document.getElementById('mainView').classList.remove('hidden');
+  render(currentState);
+}
+
+// ── IPC & events ──────────────────────────────────────────────────────────────
+
+ipcRenderer.on('usage-update', (_, state) => {
+  currentState = state;
+  render(state);
+  updateTimestamp(state);
+});
+
+document.getElementById('refreshBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('refreshBtn');
+  btn.classList.add('spinning');
+  const state = await ipcRenderer.invoke('refresh');
+  if (state) { currentState = state; render(state); updateTimestamp(state); }
+  btn.classList.remove('spinning');
+});
+
+document.getElementById('settingsBtn').addEventListener('click', showSettings);
+document.getElementById('backBtn').addEventListener('click', showMain);
+
+async function saveSettingsAndClose() {
+  const incoming = {};
+  const sk = document.getElementById('claudeKey').value.trim();
+  const ak = document.getElementById('openaiKey').value.trim();
+  const lm = document.getElementById('openaiLimit').value.trim();
+  if (sk && sk !== '••••••••') incoming.claude_session_key = sk;
+  if (ak && ak !== '••••••••') incoming.openai_api_key     = ak;
+  if (lm) incoming.openai_manual_limit = parseFloat(lm);
+  await ipcRenderer.invoke('set-config', incoming);
+  // Wait for a full poll so the main view shows Claude/OpenAI data instead of stale empty state.
+  const state = await ipcRenderer.invoke('refresh');
+  if (state) {
+    currentState = state;
+    updateTimestamp(state);
+  }
+  showMain();
+  render(currentState);
+}
+
+document.getElementById('settingsForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  saveSettingsAndClose();
+});
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+
+(async () => {
+  const [state, config] = await Promise.all([
+    ipcRenderer.invoke('get-state'),
+    ipcRenderer.invoke('get-config'),
+  ]);
+
+  currentState = state;
+  render(state);
+  updateTimestamp(state);
+
+  // Pre-fill settings fields if keys exist (masked)
+  if (config.claude_session_key) document.getElementById('claudeKey').value = '••••••••';
+  if (config.openai_api_key)     document.getElementById('openaiKey').value = '••••••••';
+  if (config.openai_manual_limit) document.getElementById('openaiLimit').value = config.openai_manual_limit;
+
+  // Auto-open settings on first launch
+  if (!config.claude_session_key && !config.openai_api_key) showSettings();
+})();
+
+// Keep "X ago" timestamp ticking
+setInterval(() => updateTimestamp(currentState), 60000);
+</script>
+</body>
+</html>
