@@ -17,16 +17,38 @@ const {
   usageLabelForService,
 } = require('./icon');
 
+function gaugeHiddenClaude() {
+  return !!store?.get('hide_claude_gauge');
+}
+function gaugeHiddenOpenAI() {
+  return !!store?.get('hide_openai_gauge');
+}
+function gaugeHiddenCursor() {
+  return !!store?.get('hide_cursor_gauge');
+}
+
 function buildTrayTooltip(state) {
   const bits = [];
-  if (state.claude && !state.claude.error) {
+  if (state.claude && !state.claude.error && !gaugeHiddenClaude()) {
     bits.push(`Claude 5h ${Math.round(state.claude.fiveHour?.utilization ?? 0)}%`);
   }
-  if (state.openai && !state.openai.error) {
+  if (state.openai && !state.openai.error && !gaugeHiddenOpenAI()) {
     bits.push(`OpenAI month ${Math.round(state.openai.utilization ?? 0)}%`);
   }
-  if (state.cursor && !state.cursor.error) {
-    bits.push(`Cursor ${Math.round(state.cursor.utilization ?? 0)}%`);
+  if (state.cursor && !state.cursor.error && !gaugeHiddenCursor()) {
+    let c = `Cursor ${Math.round(state.cursor.utilization ?? 0)}%`;
+    const od = state.cursor.onDemand;
+    if (od && (od.unlimited || (od.limitCents ?? 0) > 0 || (od.usedCents ?? 0) > 0)) {
+      const spent = ((od.usedCents ?? 0) / 100).toFixed(2);
+      if (od.unlimited) {
+        c += ` · on-demand $${spent}`;
+      } else if (od.limitCents > 0) {
+        c += ` · $${spent}/$${(od.limitCents / 100).toFixed(2)}`;
+      } else if ((od.usedCents ?? 0) > 0) {
+        c += ` · on-demand $${spent}`;
+      }
+    }
+    bits.push(c);
   }
   return bits.length ? bits.join(' · ') : 'AI Usage';
 }
@@ -36,6 +58,19 @@ debug.installProcessHandlers();
 let mb;
 let poller;
 let store;
+
+/** Poll state + per-provider gauge visibility for the popover */
+function stateForRenderer() {
+  const state = poller?.getState() || {};
+  return {
+    ...state,
+    gaugeHidden: {
+      claude: !!store?.get('hide_claude_gauge'),
+      openai: !!store?.get('hide_openai_gauge'),
+      cursor: !!store?.get('hide_cursor_gauge'),
+    },
+  };
+}
 
 app.whenReady().then(() => {
   debug.init(app);
@@ -102,7 +137,7 @@ app.whenReady().then(() => {
 
       // Forward state to the open popover (no-op if window is hidden).
       if (mb.window?.webContents) {
-        mb.window.webContents.send('usage-update', state);
+        mb.window.webContents.send('usage-update', stateForRenderer());
       }
     });
 
@@ -126,7 +161,7 @@ app.whenReady().then(() => {
 
 // ── IPC handlers ──────────────────────────────────────────────────────────
 
-ipcMain.handle('get-state', () => poller?.getState() || {});
+ipcMain.handle('get-state', () => stateForRenderer());
 
 ipcMain.handle('get-config', () => store.getAll());
 
@@ -172,7 +207,13 @@ ipcMain.handle('set-config', (_, incoming) => {
     cursor_cookie: incoming.cursor_cookie
       ? `updated (length ${incoming.cursor_cookie.length})`
       : 'unchanged',
+    hide_claude_gauge: incoming.hide_claude_gauge !== undefined ? !!incoming.hide_claude_gauge : 'unchanged',
+    hide_openai_gauge: incoming.hide_openai_gauge !== undefined ? !!incoming.hide_openai_gauge : 'unchanged',
+    hide_cursor_gauge: incoming.hide_cursor_gauge !== undefined ? !!incoming.hide_cursor_gauge : 'unchanged',
   });
+  if ('hide_claude_gauge' in incoming) merged.hide_claude_gauge = !!incoming.hide_claude_gauge;
+  if ('hide_openai_gauge' in incoming) merged.hide_openai_gauge = !!incoming.hide_openai_gauge;
+  if ('hide_cursor_gauge' in incoming) merged.hide_cursor_gauge = !!incoming.hide_cursor_gauge;
   store.setAll(merged);
 
   if (poller) {
@@ -209,7 +250,7 @@ ipcMain.handle('get-settings-diagnostics', () => {
 
 ipcMain.handle('refresh', async () => {
   await poller?.poll();
-  return poller?.getState();
+  return stateForRenderer();
 });
 
 ipcMain.handle('resize', (_, height) => {

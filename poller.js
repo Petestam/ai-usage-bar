@@ -38,10 +38,24 @@ class Poller {
   // "Active" = had a positive change rate in the last poll cycle, or changed
   // within the active window. If both are active, returns the one burning faster.
   // Falls back to the highest-utilization service so the icon is never blank.
+  gaugeVisible(serviceName) {
+    if (serviceName === 'claude') return !this.store.get('hide_claude_gauge', false);
+    if (serviceName === 'openai') return !this.store.get('hide_openai_gauge', false);
+    if (serviceName === 'cursor') return !this.store.get('hide_cursor_gauge', false);
+    return true;
+  }
+
   activeService() {
     const now  = Date.now();
     const svcs = [this.state.claude, this.state.openai, this.state.cursor]
-      .filter(s => s && !s.error && s.lastFetched && (now - s.lastFetched < ACTIVE_WINDOW_MS));
+      .filter(
+        (s) =>
+          s &&
+          !s.error &&
+          s.lastFetched &&
+          now - s.lastFetched < ACTIVE_WINDOW_MS &&
+          this.gaugeVisible(s.service)
+      );
     if (svcs.length === 0) return null;
 
     // Prefer service with a positive burn rate (something changed last cycle)

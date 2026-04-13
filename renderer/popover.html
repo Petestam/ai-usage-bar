@@ -126,6 +126,25 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+.progress-row--money .bar-bg {
+  display: none;
+}
+.progress-money {
+  flex: 1;
+  font-size: 11px;
+  color: #8E8E93;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.ondemand-spend {
+  color: #E5E5EA;
+  font-weight: 600;
+}
+.ondemand-cap {
+  color: #8E8E93;
+  font-weight: 400;
+}
+
 .reset-label {
   font-size: 10px;
   color: #48484A;
@@ -214,6 +233,24 @@ body {
   color: #48484A;
   margin-top: 3px;
   line-height: 1.4;
+}
+
+.field-gauge {
+  margin-top: 5px;
+  margin-bottom: 0;
+}
+.field-gauge .gauge-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 11px;
+  font-family: inherit;
+  color: #0A84FF;
+  cursor: pointer;
+  text-decoration: none;
+}
+.field-gauge .gauge-link:hover {
+  text-decoration: underline;
 }
 
 .save-btn {
@@ -397,6 +434,9 @@ details.troubleshoot[open] > summary .troubleshoot-chevron {
       <label>Claude Session Key</label>
       <input type="password" id="claudeKey" placeholder="sessionKey or full Cookie header" autocomplete="off" spellcheck="false"/>
       <div class="field-hint">Best: Network → request → Request Headers → <strong>cookie</strong>. If you copy from Application → Cookies, include the whole row — the app strips extra fields like Domain/expires/Path. Or paste only the token after <strong>sessionKey=</strong>.</div>
+      <div class="field-gauge">
+        <button type="button" class="gauge-link" data-gauge="claude" id="gaugeToggleClaude">hide</button>
+      </div>
     </div>
 
     <div class="field">
@@ -409,6 +449,9 @@ details.troubleshoot[open] > summary .troubleshoot-chevron {
       <label>OpenAI API Key</label>
       <input type="password" id="openaiKey" placeholder="sk-…" autocomplete="off" spellcheck="false"/>
       <div class="field-hint">platform.openai.com → API keys</div>
+      <div class="field-gauge">
+        <button type="button" class="gauge-link" data-gauge="openai" id="gaugeToggleOpenai">hide</button>
+      </div>
     </div>
 
     <div class="field">
@@ -421,6 +464,9 @@ details.troubleshoot[open] > summary .troubleshoot-chevron {
       <label>Cursor session (cookie)</label>
       <input type="password" id="cursorCookie" placeholder="Full cookie header or Workos token" autocomplete="off" spellcheck="false"/>
       <div class="field-hint">cursor.com → DevTools → Network → request to <strong>cursor.com</strong> → copy the full <strong>cookie</strong> request header. Needs <code>WorkosCursorSessionToken</code> or session cookies.</div>
+      <div class="field-gauge">
+        <button type="button" class="gauge-link" data-gauge="cursor" id="gaugeToggleCursor">hide</button>
+      </div>
     </div>
 
     <button type="submit" class="save-btn" id="saveBtn">Save &amp; Refresh</button>
@@ -489,16 +535,39 @@ function resetLine(date) {
   return str ? `<div class="reset-label">${str}</div>` : '';
 }
 
+/** Cursor on-demand spend (USD) when API includes spendLimitUsage */
+function cursorOnDemandRow(od) {
+  if (!od) return '';
+  const used = (od.usedCents ?? 0) / 100;
+  if (od.unlimited) {
+    return `<div class="progress-row progress-row--money">
+      <span class="progress-label">On-demand</span>
+      <span class="progress-money"><span class="ondemand-spend">$${used.toFixed(2)}</span> · unlimited</span>
+    </div>`;
+  }
+  const lim = (od.limitCents ?? 0) / 100;
+  return `<div class="progress-row progress-row--money">
+    <span class="progress-label">On-demand</span>
+    <span class="progress-money"><span class="ondemand-spend">$${used.toFixed(2)}</span><span class="ondemand-cap"> / $${lim.toFixed(2)}</span></span>
+  </div>`;
+}
+
 // ── Render ───────────────────────────────────────────────────────────────────
 
 function render(state) {
   const container   = document.getElementById('servicesContainer');
-  const hasClaude   = !!state.claude;
-  const hasOpenAI   = !!state.openai;
-  const hasCursor   = !!state.cursor;
+  const gh = state.gaugeHidden || {};
+  const hasClaude   = !!state.claude && !gh.claude;
+  const hasOpenAI   = !!state.openai && !gh.openai;
+  const hasCursor   = !!state.cursor && !gh.cursor;
+  const anyConfigured = !!(state.claude || state.openai || state.cursor);
 
   if (!hasClaude && !hasOpenAI && !hasCursor) {
-    container.innerHTML = `<div class="empty">No services configured.<br><a id="goSettings">Open Settings</a> to add your keys.</div>`;
+    if (anyConfigured) {
+      container.innerHTML = `<div class="empty">All providers are hidden from the gauge.<br><a id="goSettings">Open Settings</a> to show them.</div>`;
+    } else {
+      container.innerHTML = `<div class="empty">No services configured.<br><a id="goSettings">Open Settings</a> to add your keys.</div>`;
+    }
     document.getElementById('goSettings')?.addEventListener('click', showSettings);
     resize(160);
     return;
@@ -588,6 +657,7 @@ function render(state) {
         u.apiUtilization != null && Number.isFinite(u.apiUtilization)
           ? progressRow('API', u.apiUtilization)
           : '';
+      const onDemandRow = cursorOnDemandRow(u.onDemand);
       const headerClass = u.displayMessage ? 'service-header service-header--stacked' : 'service-header';
       html += `<div class="service-card">
         <div class="${headerClass}">
@@ -597,6 +667,7 @@ function render(state) {
         ${progressRow('Total', u.utilization || 0)}
         ${autoRow}
         ${apiRow}
+        ${onDemandRow}
         ${resetLine(u.resetsAt)}
       </div>`;
     }
@@ -608,7 +679,17 @@ function render(state) {
   const cardH = cardCount <= 1 ? 110 : Math.min(320, 70 + cardCount * 88);
   const cursorDetailPad =
     hasCursor && state.cursor && !state.cursor.error && state.cursor.displayMessage ? 28 : 0;
-  resize(baseH + cardH + cursorDetailPad);
+  const cursorOnDemandPad =
+    hasCursor && state.cursor && !state.cursor.error && state.cursor.onDemand ? 22 : 0;
+  resize(baseH + cardH + cursorDetailPad + cursorOnDemandPad);
+}
+
+function gaugeVisibleLastFetched(state, key) {
+  const gh = state.gaugeHidden || {};
+  if (key === 'claude' && gh.claude) return null;
+  if (key === 'openai' && gh.openai) return null;
+  if (key === 'cursor' && gh.cursor) return null;
+  return state[key]?.lastFetched;
 }
 
 function escapeHtml(s) {
@@ -621,7 +702,11 @@ function escapeHtml(s) {
 
 function updateTimestamp(state) {
   const el    = document.getElementById('lastUpdated');
-  const times = [state.claude?.lastFetched, state.openai?.lastFetched, state.cursor?.lastFetched].filter(Boolean);
+  const times = [
+    gaugeVisibleLastFetched(state, 'claude'),
+    gaugeVisibleLastFetched(state, 'openai'),
+    gaugeVisibleLastFetched(state, 'cursor'),
+  ].filter(Boolean);
   if (!times.length) { el.textContent = '—'; return; }
   const ago = Math.round((Date.now() - Math.max(...times)) / 60000);
   el.textContent = ago < 1 ? 'just now' : `${ago}m ago`;
@@ -708,10 +793,33 @@ function resizeSettingsWindow() {
   });
 }
 
+const GAUGE_CONFIG_KEY = {
+  claude: 'hide_claude_gauge',
+  openai: 'hide_openai_gauge',
+  cursor: 'hide_cursor_gauge',
+};
+
+const GAUGE_LABEL = { claude: 'Claude', openai: 'OpenAI', cursor: 'Cursor' };
+
+function syncGaugeToggleLabels() {
+  const gh = currentState.gaugeHidden || {};
+  [['claude', 'gaugeToggleClaude'], ['openai', 'gaugeToggleOpenai'], ['cursor', 'gaugeToggleCursor']].forEach(
+    ([name, id]) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const hidden = !!gh[name];
+      const label = GAUGE_LABEL[name] || name;
+      el.textContent = hidden ? 'show' : 'hide';
+      el.setAttribute('aria-label', hidden ? `Show ${label} in gauge` : `Hide ${label} from gauge`);
+    }
+  );
+}
+
 async function showSettings() {
   document.getElementById('mainView').classList.add('hidden');
   document.getElementById('settingsView').classList.add('visible');
   await refreshSettingsDiagnostics();
+  syncGaugeToggleLabels();
 }
 
 function showMain() {
@@ -726,6 +834,9 @@ ipcRenderer.on('usage-update', (_, state) => {
   currentState = state;
   render(state);
   updateTimestamp(state);
+  if (document.getElementById('settingsView').classList.contains('visible')) {
+    syncGaugeToggleLabels();
+  }
 });
 
 document.getElementById('refreshBtn').addEventListener('click', async () => {
@@ -786,6 +897,10 @@ async function saveSettingsAndClose() {
   if (ak && ak !== '••••••••') incoming.openai_api_key     = ak;
   if (lm) incoming.openai_manual_limit = parseFloat(lm);
   if (cur !== '••••••••') incoming.cursor_cookie = cur;
+  const gh = currentState.gaugeHidden || {};
+  incoming.hide_claude_gauge = !!gh.claude;
+  incoming.hide_openai_gauge = !!gh.openai;
+  incoming.hide_cursor_gauge = !!gh.cursor;
   await ipcRenderer.invoke('set-config', incoming);
   // Wait for a full poll so the main view shows Claude/OpenAI data instead of stale empty state.
   const state = await ipcRenderer.invoke('refresh');
@@ -821,6 +936,25 @@ document.getElementById('settingsForm').addEventListener('submit', (e) => {
   if (config.openai_api_key)     document.getElementById('openaiKey').value = '••••••••';
   if (config.openai_manual_limit) document.getElementById('openaiLimit').value = config.openai_manual_limit;
   if (config.cursor_cookie) document.getElementById('cursorCookie').value = '••••••••';
+
+  syncGaugeToggleLabels();
+
+  document.querySelectorAll('.gauge-link[data-gauge]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const name = btn.getAttribute('data-gauge');
+      const key = GAUGE_CONFIG_KEY[name];
+      if (!key) return;
+      const isHidden = !!(currentState.gaugeHidden || {})[name];
+      await ipcRenderer.invoke('set-config', { [key]: !isHidden });
+      const next = await ipcRenderer.invoke('refresh');
+      if (next) {
+        currentState = next;
+        render(next);
+        updateTimestamp(next);
+        syncGaugeToggleLabels();
+      }
+    });
+  });
 
   // Auto-open settings on first launch
   if (!config.claude_session_key && !config.openai_api_key && !config.cursor_cookie) showSettings();

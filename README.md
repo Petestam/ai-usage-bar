@@ -8,7 +8,11 @@ macOS menubar app that shows a battery-style icon for whichever AI service is us
 
 1. Open **[Releases](https://github.com/Petestam/ai-usage-bar/releases)** and download the latest **`AI Usage-x.x.x-universal.dmg`** (or the `.zip` if you prefer).
 2. Open the DMG, drag **AI Usage** into **Applications**.
-3. **First launch:** the app is not signed with an Apple Developer ID certificate. **Control‑click (or right‑click) the app → Open → Open** once, or allow it under **System Settings → Privacy & Security** when macOS blocks it.
+3. **First launch (Gatekeeper):** public builds are **not** signed with an Apple **Developer ID** and are **not notarized**, so macOS may say the app **can’t be opened**, **is damaged**, or **Apple cannot verify** it. That’s expected until the project ships a signed + notarized build. Try in order:
+   - **System Settings → Privacy & Security** — scroll down and click **Open Anyway** next to the message about **AI Usage** (appears after a blocked launch attempt).
+   - Or **Control‑click (right‑click) AI Usage → Open → Open** once.
+   - If the app still won’t run, remove the **quarantine** flag from the downloaded app, then open again:  
+     `xattr -dr com.apple.quarantine "/Applications/AI Usage.app"`
 4. Launch **AI Usage** from Applications. If no credentials are set yet, **Settings** opens automatically.
 
 Then continue with **[Add credentials](#add-credentials)** below.
@@ -113,7 +117,7 @@ Cursor does not publish a stable public API for personal plan usage; the app cal
 
 If you paste only the raw `WorkosCursorSessionToken` value (no `name=`), the app prefixes it automatically. DevTools cookie rows that include `Domain=` / `expires=` are sanitized like Claude.
 
-**Note:** This integration relies on **undocumented** endpoints; Cursor may change them. The API returns **`individualUsage`** / **`teamUsage`** (often with a nested **`plan`** object) with **Total**, **Auto**, and **API** percentages like the Spending page. The gauge uses **Total**; the popover shows **Auto** / **API** when present, plus billing-cycle reset when dates are available.
+**Note:** This integration relies on **undocumented** endpoints; Cursor may change them. The API returns **`individualUsage`** / **`teamUsage`** (often with a nested **`plan`** object) with **Total**, **Auto**, and **API** percentages like the Spending page. The gauge uses **Total**; the popover shows **Auto** / **API** when present, plus billing-cycle reset when dates are available. The popover also shows **on-demand** spend vs cap when the API includes **`individualUsage.onDemand`** / **`teamUsage.onDemand`** (`used` and `limit` in **cents**, as in the web app). If those objects are absent, the parser falls back to **`spendLimitUsage`** and uses **`totalSpend`** / limit fields there.
 
 ---
 
@@ -124,7 +128,7 @@ Configuration is saved as JSON next to the app’s other data:
 - **Path:** `~/Library/Application Support/AI Usage/ai-usage-config.json`  
   (If the folder name differs slightly, open **Settings → Troubleshooting** in the app — it prints the exact **Config** path.)
 
-You can edit `poll_interval_ms` there (default **90000** ms). Example:
+You can edit `poll_interval_ms` there (default **90000** ms). Optional **`hide_*_gauge`** booleans hide a provider from the menubar icon and popover while keeping credentials stored (same toggles as **Settings**). Example:
 
 ```json
 {
@@ -132,7 +136,10 @@ You can edit `poll_interval_ms` there (default **90000** ms). Example:
   "claude_session_key": "…",
   "openai_api_key": "sk-…",
   "openai_manual_limit": 20,
-  "cursor_cookie": "WorkosCursorSessionToken=…"
+  "cursor_cookie": "WorkosCursorSessionToken=…",
+  "hide_claude_gauge": false,
+  "hide_openai_gauge": false,
+  "hide_cursor_gauge": false
 }
 ```
 
@@ -171,7 +178,15 @@ npm run build:x64     # Intel
 2. Tag and push: `git tag vX.Y.Z && git push origin vX.Y.Z`
 3. Create a release on GitHub and attach **`dist/AI Usage-x.x.x-universal.dmg`** (and optionally the `.zip`), or use **`gh release create`** with those files.
 
-**Signing / notarization:** For installs without Gatekeeper warnings you need an Apple Developer ID, signing, and notarization — see [electron.build code signing](https://www.electron.build/code-signing) and Apple’s notarization docs.
+**Signing / notarization:** For installs **without** Gatekeeper warnings, ship a **Developer ID Application** signed build and **notarize** it with Apple (paid Apple Developer Program membership required).
+
+- **electron-builder:** set `mac.hardenedRuntime` and `mac.gatekeeperAssess` as in the [macOS](https://www.electron.build/configuration/mac) docs, and provide credentials via **environment variables** at build time, for example:
+  - `CSC_LINK` — path to your **`.p12`** certificate export, or `keychain:` to use the keychain
+  - `CSC_KEY_PASSWORD` — password for that `.p12`
+  - `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID` — for **notarization** (app-specific password from [appleid.apple.com](https://appleid.apple.com))
+- Overview: [electron.build code signing](https://www.electron.build/code-signing) and Apple’s notarization workflow.
+
+Until that is done, end users must use **Open Anyway** / **right‑click → Open** or `xattr -dr com.apple.quarantine` as in [Install from a release](#install-from-a-release-recommended).
 
 ---
 
@@ -196,6 +211,7 @@ npm run build:x64     # Intel
 
 | Issue | What to try |
 |-------|-------------|
+| **macOS won’t open the app** (“damaged”, “can’t verify”, malware warning) | Builds are **unsigned** until Developer ID + notarization are configured. Use **System Settings → Privacy & Security → Open Anyway**, or **right‑click → Open**, or `xattr -dr com.apple.quarantine "/Applications/AI Usage.app"` then open again. |
 | **HTTP 403** on Claude | Paste the **full** `cookie` header from Network (not only `sessionKey`). Add **organization ID** if you have it. Ensure you’re on the latest build. |
 | **Cursor** errors or no % | Paste the full **`cookie`** header from a **cursor.com** Network request (must include session cookies). Log in again at cursor.com if expired. |
 | **Session expired** | Copy a fresh `sessionKey` or full cookie after logging in at claude.ai. |

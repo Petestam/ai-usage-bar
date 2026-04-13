@@ -117,6 +117,7 @@ class CursorProvider {
         apiUtilization:   parsed.apiUtilization,
         resetsAt:         parsed.resetsAt,
         displayMessage:   parsed.displayMessage || null,
+        onDemand:         parsed.onDemand || null,
         changeRate:       this.changeRate,
         lastFetched:      now,
         error:            null,

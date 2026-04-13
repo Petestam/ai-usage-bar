@@ -60,6 +60,9 @@ const headers = {
     }
     console.log('\nParsed (what the menubar app uses):');
     console.log(JSON.stringify(parsed, (_, v) => (v instanceof Date ? v.toISOString() : v), 2));
+    if (parsed?.onDemand) {
+      console.log('\nOn-demand (spendLimitUsage):', parsed.onDemand);
+    }
   } catch (e) {
     console.error(e.message);
     if (e.response) console.error('HTTP', e.response.status, e.response.data?.toString?.().slice(0, 300));
