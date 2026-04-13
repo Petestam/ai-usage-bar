@@ -1,6 +1,6 @@
 # AI Usage Bar
 
-macOS menubar app that shows a battery-style icon for whichever AI service is using quota right now (Claude web limits and/or OpenAI monthly spend). Click the icon to open the popover with percentages and reset times.
+macOS menubar app that shows a battery-style icon for whichever AI service is using quota right now (**Claude** web limits, **OpenAI** monthly spend, and/or **Cursor** plan usage). Click the icon to open the popover with percentages and reset times.
 
 ---
 
@@ -28,11 +28,23 @@ npm start
 
 The menubar icon appears after the app starts. Use **Settings** (gear) in the popover to add keys.
 
+### Test Cursor cookie / parsing (optional)
+
+From the repo root (requires network):
+
+```bash
+CURSOR_TEST_COOKIE='paste full cookie header from cursor.com Network tab' npm run test:cursor
+```
+
+Wrap the cookie in **single quotes** — it contains **`;`** and the shell will split on semicolons otherwise (`command not found: cursor-web-target-synced-user=...`).
+
+You should see **HTTP 200** and a parsed **utilization** percentage. **401** means the cookie is expired or invalid — log in again at [cursor.com](https://cursor.com) and copy a fresh `cookie` header.
+
 ---
 
 ## Add credentials
 
-You can configure **Claude**, **OpenAI**, or both. At least one is required for the app to show usage.
+You can configure **Claude**, **OpenAI**, and/or **Cursor**. At least one is required for the app to show usage.
 
 ### Claude (claude.ai web usage)
 
@@ -90,6 +102,21 @@ This skips extra discovery calls when you already know the correct org.
 
 ---
 
+### Cursor (plan usage %)
+
+Cursor does not publish a stable public API for personal plan usage; the app calls the same **`usage-summary`** endpoint the **cursor.com** dashboard uses, authenticated with your **browser session**.
+
+1. Log in at **[cursor.com](https://cursor.com)** (or open the dashboard while logged in).
+2. **DevTools** → **Network** → reload or navigate until you see requests to **`cursor.com`**.
+3. Select a request → **Headers** → **Request Headers** → copy the full **`cookie`** value (must include **`WorkosCursorSessionToken`** and/or **`next-auth.session-token`** style cookies — whatever the browser sends).
+4. Paste into **Settings → Cursor session (cookie)** and save.
+
+If you paste only the raw `WorkosCursorSessionToken` value (no `name=`), the app prefixes it automatically. DevTools cookie rows that include `Domain=` / `expires=` are sanitized like Claude.
+
+**Note:** This integration relies on **undocumented** endpoints; Cursor may change them. The API returns **`individualUsage`** / **`teamUsage`** (often with a nested **`plan`** object) with **Total**, **Auto**, and **API** percentages like the Spending page. The gauge uses **Total**; the popover shows **Auto** / **API** when present, plus billing-cycle reset when dates are available.
+
+---
+
 ## Where settings are stored
 
 Configuration is saved as JSON next to the app’s other data:
@@ -104,7 +131,8 @@ You can edit `poll_interval_ms` there (default **90000** ms). Example:
   "poll_interval_ms": 60000,
   "claude_session_key": "…",
   "openai_api_key": "sk-…",
-  "openai_manual_limit": 20
+  "openai_manual_limit": 20,
+  "cursor_cookie": "WorkosCursorSessionToken=…"
 }
 ```
 
@@ -152,13 +180,13 @@ npm run build:x64     # Intel
 - The **tray image** is a small battery bitmap (`[████░░]`), filled by consumed **%**.
 - On macOS, the **numeric percent** beside it is **menu bar text** (`tray.setTitle`), not part of the bitmap.
 - **Dim / idle** → no service has moved much in the last ~30 minutes.
-- If both Claude and OpenAI are configured, the icon follows whichever service is **most active** (burning quota faster).
+- If multiple services are configured, the icon follows whichever is **most active** (burning quota faster).
 
 ---
 
 ## Polling and refresh
 
-- Default poll interval: **90 seconds** (Claude via session; OpenAI via API/billing-related calls).
+- Default poll interval: **90 seconds** (Claude via session; OpenAI via API/billing-related calls; Cursor via cursor.com session).
 - Change interval with **`poll_interval_ms`** in `ai-usage-config.json` (see above).
 - Use the **refresh** control in the popover for an immediate pull.
 
@@ -169,6 +197,7 @@ npm run build:x64     # Intel
 | Issue | What to try |
 |-------|-------------|
 | **HTTP 403** on Claude | Paste the **full** `cookie` header from Network (not only `sessionKey`). Add **organization ID** if you have it. Ensure you’re on the latest build. |
+| **Cursor** errors or no % | Paste the full **`cookie`** header from a **cursor.com** Network request (must include session cookies). Log in again at cursor.com if expired. |
 | **Session expired** | Copy a fresh `sessionKey` or full cookie after logging in at claude.ai. |
 | **Nothing saves** | Use **Save & Refresh** in Settings. The back arrow does **not** save. If the Claude field shows bullets (`••••••••`), paste a **new** full value to replace the stored key. |
 | **Debug** | **Settings → Troubleshooting** shows config/log paths, recent errors, and a **Copy all** button. |

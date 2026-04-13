@@ -5,6 +5,7 @@
 const axios = require('axios');
 const debug = require('../debug');
 const { canUseElectronNet, netGet } = require('./claude-net');
+const { buildClaudeCookieHeader } = require('./cookie-sanitize');
 
 // Match a real browser for the rare axios fallback.
 const BROWSER_HEADERS = {
@@ -19,55 +20,10 @@ const BROWSER_HEADERS = {
     'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
 };
 
-/** DevTools “Application → Cookies” often copies name=value plus attributes (Domain, Path, …). Those must not appear in the real Cookie header. */
-const COOKIE_ATTR_NAMES = new Set([
-  'domain',
-  'expires',
-  'max-age',
-  'path',
-  'samesite',
-  'partitionkey',
-  'priority',
-]);
-
-function isDevToolsCookieNoise(part) {
-  const p = part.trim();
-  if (!p) return true;
-  const low = p.toLowerCase();
-  if (low === 'httponly' || low === 'secure') return true;
-  const eq = p.indexOf('=');
-  if (eq === -1) return low === 'httponly' || low === 'secure';
-  const name = p.slice(0, eq).trim().toLowerCase();
-  return COOKIE_ATTR_NAMES.has(name);
-}
-
-/**
- * Stored value may be:
- * - Raw sessionKey token → sessionKey=<token>
- * - Real Cookie header → kept (multi-cookie)
- * - DevTools cookie row paste with Domain/expires/Path/… → attributes stripped
- */
-function buildCookieHeader(stored) {
-  let s = stored.trim();
-  if (/^cookie\s*:/i.test(s)) {
-    s = s.replace(/^cookie\s*:\s*/i, '').trim();
-  }
-  if (!s.includes(';') && !/^sessionKey=/i.test(s)) {
-    return `sessionKey=${s}`;
-  }
-  const parts = s.split(';').map((x) => x.trim()).filter((p) => p && !isDevToolsCookieNoise(p));
-  if (parts.length === 0) {
-    const m = s.match(/sessionKey\s*=\s*([^;]+)/i);
-    if (m) return `sessionKey=${m[1].trim()}`;
-    return s;
-  }
-  return parts.join('; ');
-}
-
 function claudeHeaders(storedCredential) {
   return {
     ...BROWSER_HEADERS,
-    Cookie: buildCookieHeader(storedCredential),
+    Cookie: buildClaudeCookieHeader(storedCredential),
   };
 }
 

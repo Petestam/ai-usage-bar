@@ -25,6 +25,9 @@ function buildTrayTooltip(state) {
   if (state.openai && !state.openai.error) {
     bits.push(`OpenAI month ${Math.round(state.openai.utilization ?? 0)}%`);
   }
+  if (state.cursor && !state.cursor.error) {
+    bits.push(`Cursor ${Math.round(state.cursor.utilization ?? 0)}%`);
+  }
   return bits.length ? bits.join(' · ') : 'AI Usage';
 }
 
@@ -144,6 +147,15 @@ ipcMain.handle('set-config', (_, incoming) => {
     delete merged.claude_org_uuid;
   }
 
+  if ('cursor_cookie' in incoming) {
+    const v = incoming.cursor_cookie;
+    if (v && String(v).trim()) {
+      merged.cursor_cookie = String(v).trim();
+    } else {
+      delete merged.cursor_cookie;
+    }
+  }
+
   debug.logSettings('set-config', {
     claude_session_key: incoming.claude_session_key
       ? `${incoming.claude_session_key.includes(';') ? 'cookie header' : 'session key'} (length ${incoming.claude_session_key.length})`
@@ -156,6 +168,9 @@ ipcMain.handle('set-config', (_, incoming) => {
       : 'unchanged',
     openai_manual_limit: incoming.openai_manual_limit !== undefined
       ? incoming.openai_manual_limit
+      : 'unchanged',
+    cursor_cookie: incoming.cursor_cookie
+      ? `updated (length ${incoming.cursor_cookie.length})`
       : 'unchanged',
   });
   store.setAll(merged);
@@ -187,6 +202,7 @@ ipcMain.handle('get-settings-diagnostics', () => {
     services: {
       claude: svc(st.claude),
       openai: svc(st.openai),
+      cursor: svc(st.cursor),
     },
   };
 });
@@ -197,7 +213,11 @@ ipcMain.handle('refresh', async () => {
 });
 
 ipcMain.handle('resize', (_, height) => {
-  if (mb.window) mb.window.setSize(320, height);
+  if (!mb.window) return;
+  const { screen } = require('electron');
+  const maxH = Math.floor(screen.getPrimaryDisplay().workAreaSize.height * 0.92);
+  const h = Math.min(Math.max(120, Math.round(height)), maxH);
+  mb.window.setSize(320, h);
 });
 
 ipcMain.handle('quit-app', () => {

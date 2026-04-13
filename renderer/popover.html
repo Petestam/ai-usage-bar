@@ -5,6 +5,8 @@
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
+html { height: 100%; }
+
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif;
   background: #1C1C1E;
@@ -13,6 +15,7 @@ body {
   -webkit-app-region: no-drag;
   user-select: none;
   overflow: hidden;
+  height: 100%;
 }
 
 /* ── Header ─────────────────────────────────────────── */
@@ -59,6 +62,18 @@ body {
   justify-content: space-between;
   align-items: baseline;
   margin-bottom: 9px;
+}
+
+/* Long secondary copy (e.g. Cursor API messages): full width under title — avoids overlap with the name */
+.service-header--stacked {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 5px;
+}
+.service-header--stacked .service-detail {
+  max-width: 100%;
+  line-height: 1.4;
+  text-align: left;
 }
 
 .service-name { font-size: 13px; font-weight: 600; }
@@ -154,6 +169,21 @@ body {
 #settingsView.visible { display: block; }
 #mainView.hidden { display: none; }
 
+/* Tall settings: cap window height and scroll the form (avoids clipping Quit / credit) */
+#settingsView.settings-view--clamped.visible {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+#settingsView.settings-view--clamped .settings-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
 .settings-body { padding: 0 14px 14px; }
 
 .field { margin-bottom: 11px; }
@@ -218,16 +248,42 @@ body {
 .quit-btn:hover { background: #3A2020; border-color: #FF453A; }
 .quit-btn:active { background: #4A2828; }
 
-.troubleshoot {
+details.troubleshoot {
   margin-top: 12px;
   padding-top: 10px;
   border-top: 1px solid #2C2C2E;
 }
-.troubleshoot-title {
+details.troubleshoot > summary {
+  list-style: none;
+  cursor: pointer;
   font-size: 11px;
   font-weight: 600;
   color: #8E8E93;
-  margin-bottom: 6px;
+  padding: 2px 0 4px;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+details.troubleshoot > summary::-webkit-details-marker {
+  display: none;
+}
+.troubleshoot-chevron {
+  display: inline-block;
+  width: 0;
+  height: 0;
+  border-left: 5px solid #636366;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  flex-shrink: 0;
+  transition: transform 0.15s ease;
+  transform-origin: 30% 50%;
+}
+details.troubleshoot[open] > summary .troubleshoot-chevron {
+  transform: rotate(90deg);
+}
+.troubleshoot-panel {
+  padding-top: 6px;
 }
 .troubleshoot-paths {
   font-size: 10px;
@@ -268,6 +324,31 @@ body {
   cursor: pointer;
 }
 .troubleshoot-btn:hover { background: #3A3A3C; }
+
+.settings-credit {
+  padding: 8px 14px 14px;
+  font-size: 10px;
+  color: #48484A;
+  text-align: center;
+  letter-spacing: 0.02em;
+  user-select: text;
+  line-height: 1.35;
+}
+.settings-credit-line {
+  display: block;
+}
+.settings-credit-slashes {
+  display: block;
+  margin-top: 3px;
+  font-family: 'SF Mono', Menlo, monospace;
+  font-size: 9px;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  color: #5a5a5c;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: clip;
+}
 </style>
 </head>
 <body>
@@ -310,6 +391,7 @@ body {
     </button>
   </div>
 
+  <div class="settings-scroll" id="settingsScroll">
   <form class="settings-body" id="settingsForm" action="#">
     <div class="field">
       <label>Claude Session Key</label>
@@ -335,21 +417,37 @@ body {
       <div class="field-hint">Used to calculate the % gauge. Set to match your OpenAI billing limit.</div>
     </div>
 
+    <div class="field">
+      <label>Cursor session (cookie)</label>
+      <input type="password" id="cursorCookie" placeholder="Full cookie header or Workos token" autocomplete="off" spellcheck="false"/>
+      <div class="field-hint">cursor.com → DevTools → Network → request to <strong>cursor.com</strong> → copy the full <strong>cookie</strong> request header. Needs <code>WorkosCursorSessionToken</code> or session cookies.</div>
+    </div>
+
     <button type="submit" class="save-btn" id="saveBtn">Save &amp; Refresh</button>
     <div class="field-hint" style="margin-top:8px;text-align:center;">Press <strong>Enter</strong> or click the button — the <strong>←</strong> back arrow does not save.</div>
 
     <button type="button" class="quit-btn" id="quitBtn">Quit app</button>
 
-    <div class="troubleshoot">
-      <div class="troubleshoot-title">Troubleshooting</div>
-      <div class="troubleshoot-paths" id="troubleshootPaths"></div>
-      <pre class="troubleshoot-pre" id="settingsTroubleshoot" aria-label="Diagnostics log"></pre>
-      <div class="troubleshoot-actions">
-        <button type="button" class="troubleshoot-btn" id="refreshDiagnosticsBtn">Refresh log</button>
-        <button type="button" class="troubleshoot-btn" id="copyDiagnosticsBtn">Copy all</button>
+    <details class="troubleshoot" id="troubleshootDetails">
+      <summary class="troubleshoot-summary">
+        <span class="troubleshoot-chevron" aria-hidden="true"></span>
+        Troubleshooting
+      </summary>
+      <div class="troubleshoot-panel">
+        <div class="troubleshoot-paths" id="troubleshootPaths"></div>
+        <pre class="troubleshoot-pre" id="settingsTroubleshoot" aria-label="Diagnostics log"></pre>
+        <div class="troubleshoot-actions">
+          <button type="button" class="troubleshoot-btn" id="refreshDiagnosticsBtn">Refresh log</button>
+          <button type="button" class="troubleshoot-btn" id="copyDiagnosticsBtn">Copy all</button>
+        </div>
       </div>
-    </div>
+    </details>
   </form>
+  <div class="settings-credit">
+    <span class="settings-credit-line">chiefpete @ nife</span>
+    <span class="settings-credit-slashes" aria-hidden="true">/////////////////////////</span>
+  </div>
+  </div>
 </div>
 
 <script>
@@ -397,8 +495,9 @@ function render(state) {
   const container   = document.getElementById('servicesContainer');
   const hasClaude   = !!state.claude;
   const hasOpenAI   = !!state.openai;
+  const hasCursor   = !!state.cursor;
 
-  if (!hasClaude && !hasOpenAI) {
+  if (!hasClaude && !hasOpenAI && !hasCursor) {
     container.innerHTML = `<div class="empty">No services configured.<br><a id="goSettings">Open Settings</a> to add your keys.</div>`;
     document.getElementById('goSettings')?.addEventListener('click', showSettings);
     resize(160);
@@ -464,17 +563,65 @@ function render(state) {
     }
   }
 
+  if (hasCursor) {
+    cardCount++;
+    const u = state.cursor;
+    if (u.error === 'auth_expired') {
+      html += `<div class="service-card">
+        <div class="service-header">
+          <span class="service-name">Cursor</span>
+          <span class="error-badge auth">Session expired — update in Settings</span>
+        </div></div>`;
+    } else if (u.error) {
+      html += `<div class="service-card">
+        <div class="service-header">
+          <span class="service-name">Cursor</span>
+          <span class="error-badge other">Connection error</span>
+        </div></div>`;
+    } else {
+      const detail = u.displayMessage ? `<span class="service-detail">${escapeHtml(u.displayMessage)}</span>` : '';
+      const autoRow =
+        u.autoUtilization != null && Number.isFinite(u.autoUtilization)
+          ? progressRow('Auto', u.autoUtilization)
+          : '';
+      const apiRow =
+        u.apiUtilization != null && Number.isFinite(u.apiUtilization)
+          ? progressRow('API', u.apiUtilization)
+          : '';
+      const headerClass = u.displayMessage ? 'service-header service-header--stacked' : 'service-header';
+      html += `<div class="service-card">
+        <div class="${headerClass}">
+          <span class="service-name">Cursor</span>
+          ${detail}
+        </div>
+        ${progressRow('Total', u.utilization || 0)}
+        ${autoRow}
+        ${apiRow}
+        ${resetLine(u.resetsAt)}
+      </div>`;
+    }
+  }
+
   container.innerHTML = html;
 
-  // Resize window to fit content snugly (header=42 + footer=36 + card≈90 each)
   const baseH = 42 + 36;
-  const cardH = cardCount === 1 ? 110 : 200;
-  resize(baseH + cardH);
+  const cardH = cardCount <= 1 ? 110 : Math.min(320, 70 + cardCount * 88);
+  const cursorDetailPad =
+    hasCursor && state.cursor && !state.cursor.error && state.cursor.displayMessage ? 28 : 0;
+  resize(baseH + cardH + cursorDetailPad);
+}
+
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
 
 function updateTimestamp(state) {
   const el    = document.getElementById('lastUpdated');
-  const times = [state.claude?.lastFetched, state.openai?.lastFetched].filter(Boolean);
+  const times = [state.claude?.lastFetched, state.openai?.lastFetched, state.cursor?.lastFetched].filter(Boolean);
   if (!times.length) { el.textContent = '—'; return; }
   const ago = Math.round((Date.now() - Math.max(...times)) / 60000);
   el.textContent = ago < 1 ? 'just now' : `${ago}m ago`;
@@ -490,6 +637,7 @@ function formatDiagnostics(d) {
   const lines = [];
   const c = d.services?.claude;
   const o = d.services?.openai;
+  const u = d.services?.cursor;
   if (c) {
     lines.push(
       `Claude: ${c.error ? `error=${c.error}` : 'ok'}${c.errorDetail ? ` | ${c.errorDetail}` : ''}`
@@ -500,6 +648,11 @@ function formatDiagnostics(d) {
       `OpenAI: ${o.error ? `error=${o.error}` : 'ok'}${o.errorDetail ? ` | ${o.errorDetail}` : ''}`
     );
   } else lines.push('OpenAI: (not configured)');
+  if (u) {
+    lines.push(
+      `Cursor: ${u.error ? `error=${u.error}` : 'ok'}${u.errorDetail ? ` | ${u.errorDetail}` : ''}`
+    );
+  } else lines.push('Cursor: (not configured)');
   if (d.logLines?.length) {
     lines.push('');
     lines.push('--- Recent log ---');
@@ -527,7 +680,32 @@ async function refreshSettingsDiagnostics() {
     pathsEl.appendChild(b);
   }
   pre.textContent = formatDiagnostics(d);
-  resize(520);
+  resizeSettingsWindow();
+}
+
+/** Size the popover to fit the settings form, or cap height and scroll inside. */
+function resizeSettingsWindow() {
+  const sv = document.getElementById('settingsView');
+  if (!sv.classList.contains('visible')) return;
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      const header = sv.querySelector('.header');
+      const scrollEl = document.getElementById('settingsScroll');
+      const headerH = header ? header.offsetHeight : 44;
+      const maxWin = Math.max(440, Math.floor(window.screen.availHeight * 0.88));
+      scrollEl.style.maxHeight = '';
+      sv.classList.remove('settings-view--clamped');
+      const contentH = scrollEl.scrollHeight;
+      const naturalTotal = headerH + contentH + 2;
+      if (naturalTotal > maxWin) {
+        sv.classList.add('settings-view--clamped');
+        resize(maxWin);
+        scrollEl.style.maxHeight = `${maxWin - headerH}px`;
+      } else {
+        resize(Math.max(naturalTotal, 320));
+      }
+    });
+  });
 }
 
 async function showSettings() {
@@ -602,10 +780,12 @@ async function saveSettingsAndClose() {
   const ak = document.getElementById('openaiKey').value.trim();
   const lm = document.getElementById('openaiLimit').value.trim();
   const orgId = document.getElementById('claudeOrgId').value.trim();
+  const cur = document.getElementById('cursorCookie').value.trim();
   if (sk && sk !== '••••••••') incoming.claude_session_key = sk;
   incoming.claude_org_uuid = orgId;
   if (ak && ak !== '••••••••') incoming.openai_api_key     = ak;
   if (lm) incoming.openai_manual_limit = parseFloat(lm);
+  if (cur !== '••••••••') incoming.cursor_cookie = cur;
   await ipcRenderer.invoke('set-config', incoming);
   // Wait for a full poll so the main view shows Claude/OpenAI data instead of stale empty state.
   const state = await ipcRenderer.invoke('refresh');
@@ -640,9 +820,12 @@ document.getElementById('settingsForm').addEventListener('submit', (e) => {
   if (config.claude_org_uuid) document.getElementById('claudeOrgId').value = config.claude_org_uuid;
   if (config.openai_api_key)     document.getElementById('openaiKey').value = '••••••••';
   if (config.openai_manual_limit) document.getElementById('openaiLimit').value = config.openai_manual_limit;
+  if (config.cursor_cookie) document.getElementById('cursorCookie').value = '••••••••';
 
   // Auto-open settings on first launch
-  if (!config.claude_session_key && !config.openai_api_key) showSettings();
+  if (!config.claude_session_key && !config.openai_api_key && !config.cursor_cookie) showSettings();
+
+  document.getElementById('troubleshootDetails')?.addEventListener('toggle', resizeSettingsWindow);
 })();
 
 // Keep "X ago" timestamp ticking
