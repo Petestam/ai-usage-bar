@@ -6,6 +6,7 @@ const axios = require('axios');
 const debug = require('../debug');
 const { canUseElectronNet, netGet } = require('./claude-net');
 const { buildClaudeCookieHeader } = require('./cookie-sanitize');
+const { fetchOrganizationCostMtdCached } = require('./anthropic-admin-cost');
 
 // Match a real browser for the rare axios fallback.
 const BROWSER_HEADERS = {
@@ -136,61 +137,141 @@ class ClaudeProvider {
 
   async fetch() {
     const storedCredential = this.store.get('claude_session_key');
-    if (!storedCredential) return null;
+    const adminKey = this.store.get('anthropic_admin_api_key');
+    if (!storedCredential && !adminKey) return null;
 
-    try {
-      const uuid = await this.resolveOrgUuid(storedCredential);
-      if (!uuid) throw new Error('Could not resolve org UUID');
+    const spendLimitRaw = this.store.get('anthropic_api_spend_limit_usd');
+    const parsedLimit =
+      spendLimitRaw != null && String(spendLimitRaw).trim() !== ''
+        ? parseFloat(String(spendLimitRaw))
+        : NaN;
+    const spendLimitUsd =
+      Number.isFinite(parsedLimit) && parsedLimit >= 0 ? parsedLimit : 0;
+    const now = Date.now();
 
-      const resp = await claudeGet(
-        `https://claude.ai/api/organizations/${uuid}/usage`,
-        storedCredential,
-        10000
-      );
+    /** @type {{ fiveHour: object, sevenDay: object } | null} */
+    let webPayload = null;
+    let sessionError = null;
+    let sessionErrorDetail = null;
 
-      const d   = resp.data;
-      const now = Date.now();
+    if (storedCredential) {
+      try {
+        const uuid = await this.resolveOrgUuid(storedCredential);
+        if (!uuid) throw new Error('Could not resolve org UUID');
 
-      if (this.lastData && this.lastFetched) {
-        const mins  = (now - this.lastFetched) / 60000;
-        const delta = (d.five_hour?.utilization || 0) - (this.lastData.fiveHour?.utilization || 0);
-        this.changeRate = mins > 0 ? delta / mins : 0;
+        const resp = await claudeGet(
+          `https://claude.ai/api/organizations/${uuid}/usage`,
+          storedCredential,
+          10000
+        );
+
+        const d = resp.data;
+
+        if (this.lastData && this.lastFetched) {
+          const mins = (now - this.lastFetched) / 60000;
+          const delta = (d.five_hour?.utilization || 0) - (this.lastData.fiveHour?.utilization || 0);
+          this.changeRate = mins > 0 ? delta / mins : 0;
+        }
+
+        this.lastData = { fiveHour: d.five_hour, sevenDay: d.seven_day };
+        this.lastFetched = now;
+
+        webPayload = {
+          fiveHour: {
+            utilization: d.five_hour?.utilization ?? 0,
+            resetsAt: d.five_hour?.resets_at ? new Date(d.five_hour.resets_at) : null,
+          },
+          sevenDay: {
+            utilization: d.seven_day?.utilization ?? 0,
+            resetsAt: d.seven_day?.resets_at ? new Date(d.seven_day.resets_at) : null,
+          },
+        };
+      } catch (e) {
+        const status = e.response?.status;
+        logErrorResponsePreview(e);
+        const base = formatFetchError(e);
+        const detail = status === 403 ? detailWith403Hint(e, base) : base;
+        debug.logSettings('Claude web usage fetch failed:', base);
+        sessionError = status === 401 || status === 403 ? 'auth_expired' : e.message || 'fetch_failed';
+        sessionErrorDetail = detail;
+        this.changeRate = 0;
       }
+    } else {
+      this.changeRate = 0;
+    }
 
-      this.lastData    = { fiveHour: d.five_hour, sevenDay: d.seven_day };
+    /** @type {null | { spendMtdUsd: number | null, spendLimitUsd: number | null, utilization: number, error: string | null }} */
+    let consoleApi = null;
+    if (adminKey) {
+      const cost = await fetchOrganizationCostMtdCached(adminKey);
+      if (cost.error) {
+        debug.logSettings('Anthropic Console cost_report failed:', cost.error);
+        consoleApi = {
+          spendMtdUsd: null,
+          spendLimitUsd: spendLimitUsd > 0 ? spendLimitUsd : null,
+          utilization: 0,
+          error: cost.error,
+        };
+      } else {
+        const util =
+          spendLimitUsd > 0
+            ? Math.min(100, Math.round((cost.spendMtdUsd / spendLimitUsd) * 100))
+            : 0;
+        consoleApi = {
+          spendMtdUsd: cost.spendMtdUsd,
+          spendLimitUsd: spendLimitUsd > 0 ? spendLimitUsd : null,
+          utilization: util,
+          error: null,
+        };
+      }
       this.lastFetched = now;
+    }
 
+    const webUtil = webPayload?.fiveHour?.utilization ?? 0;
+    const consoleUtil =
+      consoleApi && !consoleApi.error && spendLimitUsd > 0 ? consoleApi.utilization : 0;
+    const gaugeUtilization = Math.max(webUtil, consoleUtil);
+
+    const hasWeb = webPayload != null;
+    const hasConsole =
+      consoleApi && !consoleApi.error && typeof consoleApi.spendMtdUsd === 'number';
+
+    if (!hasWeb && !hasConsole) {
+      const detail = sessionErrorDetail || (consoleApi?.error ? String(consoleApi.error) : null);
+      const topErr =
+        sessionError ||
+        (consoleApi?.error === 'auth_expired' ? 'auth_expired' : null) ||
+        'fetch_failed';
       return {
-        service:    'claude',
-        label:      'Claude',
-        fiveHour: {
-          utilization: d.five_hour?.utilization ?? 0,
-          resetsAt:    d.five_hour?.resets_at ? new Date(d.five_hour.resets_at) : null,
-        },
-        sevenDay: {
-          utilization: d.seven_day?.utilization ?? 0,
-          resetsAt:    d.seven_day?.resets_at ? new Date(d.seven_day.resets_at) : null,
-        },
-        changeRate:   this.changeRate,
-        lastFetched:  now,
-        error:        null,
-        errorDetail:  null,
-      };
-    } catch (e) {
-      const status = e.response?.status;
-      logErrorResponsePreview(e);
-      const base = formatFetchError(e);
-      const detail = status === 403 ? detailWith403Hint(e, base) : base;
-      debug.logSettings('Claude fetch failed:', base);
-      return {
-        service:      'claude',
-        label:        'Claude',
-        error:        (status === 401 || status === 403) ? 'auth_expired' : (e.message || 'fetch_failed'),
-        errorDetail:  detail,
-        lastFetched:  Date.now(),
-        changeRate:   0,
+        service: 'claude',
+        label: 'Claude',
+        fiveHour: null,
+        sevenDay: null,
+        consoleApi,
+        gaugeUtilization: 0,
+        sessionError,
+        sessionErrorDetail: sessionErrorDetail,
+        changeRate: this.changeRate,
+        lastFetched: now,
+        error: topErr,
+        errorDetail: detail,
       };
     }
+
+    return {
+      service: 'claude',
+      label: 'Claude',
+      fiveHour: webPayload?.fiveHour ?? null,
+      sevenDay: webPayload?.sevenDay ?? null,
+      consoleApi,
+      gaugeUtilization,
+      sessionError: hasWeb ? null : sessionError,
+      sessionErrorDetail: hasWeb ? null : sessionErrorDetail,
+      changeRate: this.changeRate,
+      lastFetched: this.lastFetched || now,
+      error: null,
+      errorDetail: null,
+    };
   }
 }
 

@@ -15,6 +15,7 @@ const CANVAS_PAD_RIGHT = 1;
 const BLACK = '#000000';
 const TRACK = '#AEAEB2';
 const IDLE = '#8E8E93';
+const ICON_CACHE = new Map();
 
 function hexToRgba(hex, alpha = 255) {
   const normalized = hex.replace('#', '');
@@ -82,12 +83,24 @@ function renderBatteryBitmap(consumedPercent, status = 'active') {
 }
 
 function createBatteryIcon(consumedPercent, status = 'active') {
-  return renderBatteryBitmap(consumedPercent, status);
+  const isIdle = status === 'idle';
+  const util = isIdle ? 0 : Math.max(0, Math.min(100, consumedPercent));
+  const filled = Math.round((util / 100) * SEGMENTS);
+  const key = `${status}:${filled}`;
+  const cached = ICON_CACHE.get(key);
+  if (cached) return cached;
+  const img = renderBatteryBitmap((filled / SEGMENTS) * 100, status);
+  ICON_CACHE.set(key, img);
+  return img;
 }
 
 function usageLabelForService(serviceData) {
   if (!serviceData || serviceData.error) return '';
-  const util = serviceData.fiveHour?.utilization ?? serviceData.utilization ?? 0;
+  const util =
+    serviceData.gaugeUtilization ??
+    serviceData.fiveHour?.utilization ??
+    serviceData.utilization ??
+    0;
   return `${Math.round(Math.max(0, Math.min(100, util)))}%`;
 }
 
@@ -95,7 +108,16 @@ function iconFromServiceData(serviceData) {
   if (!serviceData || serviceData.error) {
     return createBatteryIcon(0, 'idle');
   }
-  const util = Math.max(0, Math.min(100, serviceData.fiveHour?.utilization ?? serviceData.utilization ?? 0));
+  const util = Math.max(
+    0,
+    Math.min(
+      100,
+      serviceData.gaugeUtilization ??
+        serviceData.fiveHour?.utilization ??
+        serviceData.utilization ??
+        0
+    )
+  );
   const status = util > 75 ? 'critical' : util > 50 ? 'warning' : 'active';
   return createBatteryIcon(util, status);
 }

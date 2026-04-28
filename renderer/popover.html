@@ -446,6 +446,18 @@ details.troubleshoot[open] > summary .troubleshoot-chevron {
     </div>
 
     <div class="field">
+      <label>Anthropic Console Admin API key (optional)</label>
+      <input type="password" id="anthropicAdminKey" placeholder="sk-ant-admin-…" autocomplete="off" spellcheck="false"/>
+      <div class="field-hint">Console → Organization → Admin API keys. Uses Anthropic’s <strong>cost_report</strong> (API USD). May differ from the Console Usage page total (e.g. Priority Tier isn’t in cost_report; see README).</div>
+    </div>
+
+    <div class="field">
+      <label>Anthropic API spend cap (USD)</label>
+      <input type="number" id="anthropicSpendLimit" placeholder="500" min="0" max="999999" step="1"/>
+      <div class="field-hint">Optional. Denominator for the % bar (e.g. your org’s $200 limit). The numerator is still <strong>cost_report</strong> MTD, not a scraped Console number.</div>
+    </div>
+
+    <div class="field">
       <label>OpenAI API Key</label>
       <input type="password" id="openaiKey" placeholder="sk-…" autocomplete="off" spellcheck="false"/>
       <div class="field-hint">platform.openai.com → API keys</div>
@@ -500,6 +512,8 @@ details.troubleshoot[open] > summary .troubleshoot-chevron {
 const { ipcRenderer } = require('electron');
 
 let currentState = {};
+let lastRenderSignature = null;
+let lastResizeHeight = null;
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -552,9 +566,37 @@ function cursorOnDemandRow(od) {
   </div>`;
 }
 
+/** Anthropic Console org API spend (Admin key + cost_report) */
+function claudeConsoleApiRows(ca) {
+  if (!ca) return '';
+  if (ca.error) {
+    return `<div class="progress-row progress-row--money">
+      <span class="progress-label">API</span>
+      <span class="progress-money" style="color:#FF9500">Cost unavailable</span>
+    </div>`;
+  }
+  if (ca.spendMtdUsd == null) return '';
+  if (ca.spendLimitUsd != null) {
+    const spendStr = `$${ca.spendMtdUsd.toFixed(2)} / $${ca.spendLimitUsd.toFixed(0)}`;
+    return `<div class="service-header" style="margin:8px 0 6px;padding-top:8px;border-top:1px solid #2C2C2E">
+      <span class="service-name" style="font-size:11px;font-weight:600;color:#636366">API cost</span>
+      <span class="service-detail">${spendStr}</span>
+    </div>
+    ${progressRow('API', ca.utilization || 0)}
+    <div class="reset-label" style="padding-left:0">cost_report MTD · may differ from Console</div>`;
+  }
+  return `<div class="progress-row progress-row--money">
+    <span class="progress-label">API</span>
+    <span class="progress-money">$${ca.spendMtdUsd.toFixed(2)} MTD</span>
+  </div>
+  <div class="reset-label" style="padding-left:0">cost_report · may differ from Console</div>`;
+}
+
 // ── Render ───────────────────────────────────────────────────────────────────
 
 function render(state) {
+  const settingsVisible = document.getElementById('settingsView').classList.contains('visible');
+  if (settingsVisible) return;
   const container   = document.getElementById('servicesContainer');
   const gh = state.gaugeHidden || {};
   const hasClaude   = !!state.claude && !gh.claude;
@@ -563,10 +605,16 @@ function render(state) {
   const anyConfigured = !!(state.claude || state.openai || state.cursor);
 
   if (!hasClaude && !hasOpenAI && !hasCursor) {
+    const html = anyConfigured
+      ? `<div class="empty">All providers are hidden from the gauge.<br><a id="goSettings">Open Settings</a> to show them.</div>`
+      : `<div class="empty">No services configured.<br><a id="goSettings">Open Settings</a> to add your keys.</div>`;
+    const signature = `empty:${html}`;
+    if (signature === lastRenderSignature) return;
+    lastRenderSignature = signature;
     if (anyConfigured) {
-      container.innerHTML = `<div class="empty">All providers are hidden from the gauge.<br><a id="goSettings">Open Settings</a> to show them.</div>`;
+      container.innerHTML = html;
     } else {
-      container.innerHTML = `<div class="empty">No services configured.<br><a id="goSettings">Open Settings</a> to add your keys.</div>`;
+      container.innerHTML = html;
     }
     document.getElementById('goSettings')?.addEventListener('click', showSettings);
     resize(160);
@@ -580,10 +628,14 @@ function render(state) {
     cardCount++;
     const c = state.claude;
     if (c.error === 'auth_expired') {
+      const authMsg =
+        c.consoleApi?.error === 'auth_expired' && !c.fiveHour
+          ? 'Admin key invalid — update in Settings'
+          : 'Session expired — update in Settings';
       html += `<div class="service-card">
         <div class="service-header">
           <span class="service-name">Claude</span>
-          <span class="error-badge auth">Session expired — update in Settings</span>
+          <span class="error-badge auth">${authMsg}</span>
         </div></div>`;
     } else if (c.error) {
       html += `<div class="service-card">
@@ -594,12 +646,27 @@ function render(state) {
     } else {
       const fh = c.fiveHour || {};
       const sd = c.sevenDay  || {};
-      html += `<div class="service-card">
-        <div class="service-header"><span class="service-name">Claude</span></div>
-        ${progressRow('5-hour', fh.utilization || 0)}
+      const sessBanner =
+        c.sessionError === 'auth_expired'
+          ? '<span class="error-badge auth">Session expired — update in Settings</span>'
+          : c.sessionError
+            ? '<span class="error-badge other">claude.ai usage unavailable</span>'
+            : '';
+      const header =
+        sessBanner
+          ? `<div class="service-header"><span class="service-name">Claude</span>${sessBanner}</div>`
+          : `<div class="service-header"><span class="service-name">Claude</span></div>`;
+      const webRows =
+        c.fiveHour != null && c.sevenDay != null
+          ? `${progressRow('5-hour', fh.utilization || 0)}
         ${resetLine(fh.resetsAt)}
         ${progressRow('Weekly', sd.utilization || 0)}
-        ${resetLine(sd.resetsAt)}
+        ${resetLine(sd.resetsAt)}`
+          : '';
+      html += `<div class="service-card">
+        ${header}
+        ${webRows}
+        ${claudeConsoleApiRows(c.consoleApi)}
       </div>`;
     }
   }
@@ -673,6 +740,9 @@ function render(state) {
     }
   }
 
+  const signature = `cards:${html}`;
+  if (signature === lastRenderSignature) return;
+  lastRenderSignature = signature;
   container.innerHTML = html;
 
   const baseH = 42 + 36;
@@ -681,7 +751,9 @@ function render(state) {
     hasCursor && state.cursor && !state.cursor.error && state.cursor.displayMessage ? 28 : 0;
   const cursorOnDemandPad =
     hasCursor && state.cursor && !state.cursor.error && state.cursor.onDemand ? 22 : 0;
-  resize(baseH + cardH + cursorDetailPad + cursorOnDemandPad);
+  const claudeConsolePad =
+    hasClaude && state.claude && !state.claude.error && state.claude.consoleApi ? 28 : 0;
+  resize(baseH + cardH + cursorDetailPad + cursorOnDemandPad + claudeConsolePad);
 }
 
 function gaugeVisibleLastFetched(state, key) {
@@ -713,7 +785,10 @@ function updateTimestamp(state) {
 }
 
 function resize(h) {
-  ipcRenderer.invoke('resize', Math.round(h));
+  const next = Math.round(h);
+  if (next === lastResizeHeight) return;
+  lastResizeHeight = next;
+  ipcRenderer.invoke('resize', next);
 }
 
 // ── Settings view ─────────────────────────────────────────────────────────────
@@ -724,9 +799,10 @@ function formatDiagnostics(d) {
   const o = d.services?.openai;
   const u = d.services?.cursor;
   if (c) {
-    lines.push(
-      `Claude: ${c.error ? `error=${c.error}` : 'ok'}${c.errorDetail ? ` | ${c.errorDetail}` : ''}`
-    );
+    const bits = [c.error ? `error=${c.error}` : 'ok'];
+    if (c.sessionError) bits.push(`session=${c.sessionError}`);
+    if (c.consoleApi?.error) bits.push(`console_api=${c.consoleApi.error}`);
+    lines.push(`Claude: ${bits.join(' ')}${c.errorDetail ? ` | ${c.errorDetail}` : ''}`);
   } else lines.push('Claude: (not configured)');
   if (o) {
     lines.push(
@@ -832,7 +908,9 @@ function showMain() {
 
 ipcRenderer.on('usage-update', (_, state) => {
   currentState = state;
-  render(state);
+  if (!document.getElementById('settingsView').classList.contains('visible')) {
+    render(state);
+  }
   updateTimestamp(state);
   if (document.getElementById('settingsView').classList.contains('visible')) {
     syncGaugeToggleLabels();
@@ -891,9 +969,14 @@ async function saveSettingsAndClose() {
   const ak = document.getElementById('openaiKey').value.trim();
   const lm = document.getElementById('openaiLimit').value.trim();
   const orgId = document.getElementById('claudeOrgId').value.trim();
+  const anth = document.getElementById('anthropicAdminKey').value.trim();
+  const anthLim = document.getElementById('anthropicSpendLimit').value.trim();
   const cur = document.getElementById('cursorCookie').value.trim();
   if (sk && sk !== '••••••••') incoming.claude_session_key = sk;
   incoming.claude_org_uuid = orgId;
+  if (anth !== '••••••••') incoming.anthropic_admin_api_key = anth;
+  if (anthLim) incoming.anthropic_api_spend_limit_usd = parseFloat(anthLim);
+  else incoming.anthropic_api_spend_limit_usd = '';
   if (ak && ak !== '••••••••') incoming.openai_api_key     = ak;
   if (lm) incoming.openai_manual_limit = parseFloat(lm);
   if (cur !== '••••••••') incoming.cursor_cookie = cur;
@@ -902,12 +985,8 @@ async function saveSettingsAndClose() {
   incoming.hide_openai_gauge = !!gh.openai;
   incoming.hide_cursor_gauge = !!gh.cursor;
   await ipcRenderer.invoke('set-config', incoming);
-  // Wait for a full poll so the main view shows Claude/OpenAI data instead of stale empty state.
-  const state = await ipcRenderer.invoke('refresh');
-  if (state) {
-    currentState = state;
-    updateTimestamp(state);
-  }
+  const state = await ipcRenderer.invoke('get-state');
+  if (state) currentState = state;
   await refreshSettingsDiagnostics();
   showMain();
   render(currentState);
@@ -933,6 +1012,10 @@ document.getElementById('settingsForm').addEventListener('submit', (e) => {
   // Pre-fill settings fields if keys exist (masked)
   if (config.claude_session_key) document.getElementById('claudeKey').value = '••••••••';
   if (config.claude_org_uuid) document.getElementById('claudeOrgId').value = config.claude_org_uuid;
+  if (config.anthropic_admin_api_key) document.getElementById('anthropicAdminKey').value = '••••••••';
+  if (config.anthropic_api_spend_limit_usd != null && config.anthropic_api_spend_limit_usd !== '') {
+    document.getElementById('anthropicSpendLimit').value = config.anthropic_api_spend_limit_usd;
+  }
   if (config.openai_api_key)     document.getElementById('openaiKey').value = '••••••••';
   if (config.openai_manual_limit) document.getElementById('openaiLimit').value = config.openai_manual_limit;
   if (config.cursor_cookie) document.getElementById('cursorCookie').value = '••••••••';
@@ -946,7 +1029,7 @@ document.getElementById('settingsForm').addEventListener('submit', (e) => {
       if (!key) return;
       const isHidden = !!(currentState.gaugeHidden || {})[name];
       await ipcRenderer.invoke('set-config', { [key]: !isHidden });
-      const next = await ipcRenderer.invoke('refresh');
+      const next = await ipcRenderer.invoke('get-state');
       if (next) {
         currentState = next;
         render(next);
@@ -957,7 +1040,9 @@ document.getElementById('settingsForm').addEventListener('submit', (e) => {
   });
 
   // Auto-open settings on first launch
-  if (!config.claude_session_key && !config.openai_api_key && !config.cursor_cookie) showSettings();
+  if (!config.claude_session_key && !config.anthropic_admin_api_key && !config.openai_api_key && !config.cursor_cookie) {
+    showSettings();
+  }
 
   document.getElementById('troubleshootDetails')?.addEventListener('toggle', resizeSettingsWindow);
 })();

@@ -48,7 +48,7 @@ You should see **HTTP 200** and a parsed **utilization** percentage. **401** mea
 
 ## Add credentials
 
-You can configure **Claude**, **OpenAI**, and/or **Cursor**. At least one is required for the app to show usage.
+You can configure **Claude** (web session and/or Console org), **OpenAI**, and/or **Cursor**. At least one is required for the app to show usage.
 
 ### Claude (claude.ai web usage)
 
@@ -90,6 +90,19 @@ If usage works in the browser but the app still struggles to find your org autom
 3. In **Settings → Claude organization ID (optional)**, paste that UUID and save.
 
 This skips extra discovery calls when you already know the correct org.
+
+#### Optional: Anthropic Console (API org spend)
+
+The **Admin API key** (`sk-ant-admin…`) from **Claude Console → Organization → Admin API keys** is **org-scoped** and can call Anthropic’s **cost** report API. That is **API billing** (Console), not the same meter as **claude.ai** 5-hour / weekly limits.
+
+- In **Settings**, paste the **Admin API key** and optionally set **Anthropic API spend cap (USD)** so the menubar bar can reflect **month-to-date** vs your cap (same idea as OpenAI’s monthly limit).
+- You can use **only** the Admin key (no claude.ai cookie), **only** the session cookie, or **both**. With both, the icon uses the higher of the **web 5-hour %** and **API %** (when a cap is set).
+
+**Why this may not match the Console “Usage and spend limits” page**
+
+- The app sums Anthropic’s **`cost_report`** API (token / tool / code-execution style line items in USD). Per the [Usage and Cost API](https://platform.claude.com/docs/en/build-with-claude/usage-cost-api) docs, **Priority Tier costs are not included** in `cost_report` — track Priority Tier via the **usage** API (`service_tier`) instead.
+- The Console total can include **other billing surfaces** and a **billing period** that may not line up with **calendar month (UTC)** the app uses for MTD.
+- Set the **spend cap** in Settings to whatever you want the % bar to track (e.g. your **$200** org limit), even though the **dollar amount** shown is still from `cost_report`, not a scraped Console figure.
 
 #### Claude notes
 
@@ -134,6 +147,8 @@ You can edit `poll_interval_ms` there (default **90000** ms). Optional **`hide_*
 {
   "poll_interval_ms": 60000,
   "claude_session_key": "…",
+  "anthropic_admin_api_key": "sk-ant-admin-…",
+  "anthropic_api_spend_limit_usd": 500,
   "openai_api_key": "sk-…",
   "openai_manual_limit": 20,
   "cursor_cookie": "WorkosCursorSessionToken=…",

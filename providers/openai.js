@@ -5,6 +5,7 @@
 
 const axios = require('axios');
 const debug = require('../debug');
+const BILLING_TTL_MS = 10 * 60 * 1000;
 
 function formatFetchError(e) {
   const status = e.response?.status;
@@ -21,6 +22,7 @@ class OpenAIProvider {
     this.lastData    = null;
     this.lastFetched = null;
     this.changeRate  = 0; // USD per minute
+    this.billingCache = null;
   }
 
   async fetch() {
@@ -31,17 +33,35 @@ class OpenAIProvider {
     const today   = new Date().toISOString().split('T')[0];
     const monthStart = new Date(); monthStart.setDate(1);
     const monthStartStr = monthStart.toISOString().split('T')[0];
+    const now = Date.now();
 
     try {
-      // Run token usage and billing in parallel; billing may 403 on restricted keys.
-      const [tokenRes, billingSubRes, billingUsageRes] = await Promise.allSettled([
+      const cachedBillingValid =
+        this.billingCache &&
+        this.billingCache.monthStartStr === monthStartStr &&
+        now - this.billingCache.at < BILLING_TTL_MS;
+
+      // Keep token usage fresh; throttle slower billing endpoints via TTL cache.
+      const requests = [
         axios.get(`https://api.openai.com/v1/usage?date=${today}`, { headers, timeout: 10000 }),
-        axios.get('https://api.openai.com/dashboard/billing/subscription', { headers, timeout: 10000 }),
-        axios.get(
-          `https://api.openai.com/dashboard/billing/usage?start_date=${monthStartStr}&end_date=${today}`,
-          { headers, timeout: 10000 }
-        ),
-      ]);
+      ];
+      if (!cachedBillingValid) {
+        requests.push(
+          axios.get('https://api.openai.com/dashboard/billing/subscription', { headers, timeout: 10000 }),
+          axios.get(
+            `https://api.openai.com/dashboard/billing/usage?start_date=${monthStartStr}&end_date=${today}`,
+            { headers, timeout: 10000 }
+          )
+        );
+      }
+      const settled = await Promise.allSettled(requests);
+      const tokenRes = settled[0];
+      const billingSubRes = cachedBillingValid
+        ? { status: 'fulfilled', value: { data: this.billingCache.subscription } }
+        : settled[1];
+      const billingUsageRes = cachedBillingValid
+        ? { status: 'fulfilled', value: { data: this.billingCache.usage } }
+        : settled[2];
 
       // Tokens used today
       let tokensToday = 0;
@@ -65,7 +85,6 @@ class OpenAIProvider {
         spendMtd = (billingUsageRes.value.data?.total_usage || 0) / 100;
       }
 
-      const now         = Date.now();
       const utilization = spendLimit > 0 ? Math.round((spendMtd / spendLimit) * 100) : 0;
 
       // Burn rate: USD per minute
@@ -77,6 +96,14 @@ class OpenAIProvider {
 
       this.lastData    = { spendMtd };
       this.lastFetched = now;
+      if (!cachedBillingValid && billingSubRes.status === 'fulfilled' && billingUsageRes.status === 'fulfilled') {
+        this.billingCache = {
+          at: now,
+          monthStartStr,
+          subscription: billingSubRes.value.data || {},
+          usage: billingUsageRes.value.data || {},
+        };
+      }
 
       // Billing period resets on the 1st of next month
       const resetsAt = new Date(); resetsAt.setMonth(resetsAt.getMonth() + 1, 1); resetsAt.setHours(0, 0, 0, 0);

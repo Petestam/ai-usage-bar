@@ -3,6 +3,7 @@ const OpenAIProvider  = require('./providers/openai');
 const CursorProvider  = require('./providers/cursor');
 
 const ACTIVE_WINDOW_MS = 30 * 60 * 1000; // 30 min of no change = idle
+const MIN_POLL_MS = 15 * 1000;
 
 class Poller {
   constructor(store, onUpdate) {
@@ -21,7 +22,9 @@ class Poller {
     this._pollInFlight = true;
     try {
       const [c, o, u] = await Promise.allSettled([
-        this.store.get('claude_session_key') ? this.claude.fetch() : Promise.resolve(null),
+        this.store.get('claude_session_key') || this.store.get('anthropic_admin_api_key')
+          ? this.claude.fetch()
+          : Promise.resolve(null),
         this.store.get('openai_api_key')     ? this.openai.fetch() : Promise.resolve(null),
         this.store.get('cursor_cookie')      ? this.cursor.fetch() : Promise.resolve(null),
       ]);
@@ -66,14 +69,15 @@ class Poller {
 
     // Nothing actively changing — return highest utilization as fallback
     return svcs.sort((a, b) => {
-      const au = a.fiveHour?.utilization ?? a.utilization ?? 0;
-      const bu = b.fiveHour?.utilization ?? b.utilization ?? 0;
+      const au = a.gaugeUtilization ?? a.fiveHour?.utilization ?? a.utilization ?? 0;
+      const bu = b.gaugeUtilization ?? b.fiveHour?.utilization ?? b.utilization ?? 0;
       return bu - au;
     })[0];
   }
 
   start() {
-    const pollMs = this.store.get('poll_interval_ms', 90 * 1000); // default 90s
+    const configuredMs = Number(this.store.get('poll_interval_ms', 90 * 1000));
+    const pollMs = Number.isFinite(configuredMs) ? Math.max(MIN_POLL_MS, configuredMs) : 90 * 1000;
     this.poll();
     this.timer = setInterval(() => this.poll(), pollMs);
   }

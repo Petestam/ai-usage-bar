@@ -30,7 +30,16 @@ function gaugeHiddenCursor() {
 function buildTrayTooltip(state) {
   const bits = [];
   if (state.claude && !state.claude.error && !gaugeHiddenClaude()) {
-    bits.push(`Claude 5h ${Math.round(state.claude.fiveHour?.utilization ?? 0)}%`);
+    const g = Math.round(
+      state.claude.gaugeUtilization ?? state.claude.fiveHour?.utilization ?? 0
+    );
+    let line = `Claude ${g}%`;
+    const ca = state.claude.consoleApi;
+    if (ca && !ca.error && ca.spendMtdUsd != null) {
+      line += ` · API $${ca.spendMtdUsd.toFixed(2)}`;
+      if (ca.spendLimitUsd != null) line += ` / $${ca.spendLimitUsd.toFixed(0)}`;
+    }
+    bits.push(line);
   }
   if (state.openai && !state.openai.error && !gaugeHiddenOpenAI()) {
     bits.push(`OpenAI month ${Math.round(state.openai.utilization ?? 0)}%`);
@@ -58,6 +67,10 @@ debug.installProcessHandlers();
 let mb;
 let poller;
 let store;
+let lastTrayIconKey = null;
+let lastTrayTooltip = null;
+let lastTrayTitle = null;
+let lastWindowHeight = null;
 
 /** Poll state + per-provider gauge visibility for the popover */
 function stateForRenderer() {
@@ -116,27 +129,41 @@ app.whenReady().then(() => {
     if (process.platform === 'darwin' && typeof mb.tray.setTitle === 'function') {
       mb.tray.setTitle('');
     }
+    lastTrayTitle = '';
 
     poller = new Poller(store, (state) => {
       // Update tray icon with the active service's battery level + usage label.
       // If nothing is active, show idle (dim battery, no label).
       const active = poller.activeService();
+      const iconKey = active && !active.error
+        ? `${active.service}:${usageLabelForService(active)}`
+        : 'idle';
       const next = active ? iconFromServiceData(active) : createBatteryIcon(0, 'idle');
       if (next.isEmpty()) {
         debug.log('WARNING: setImage with empty icon', describeNativeImage(next));
       }
-      mb.tray.setImage(next);
+      if (iconKey !== lastTrayIconKey) {
+        mb.tray.setImage(next);
+        lastTrayIconKey = iconKey;
+      }
       if (typeof mb.tray.setToolTip === 'function') {
-        mb.tray.setToolTip(buildTrayTooltip(state));
+        const tip = buildTrayTooltip(state);
+        if (tip !== lastTrayTooltip) {
+          mb.tray.setToolTip(tip);
+          lastTrayTooltip = tip;
+        }
       }
       // macOS: native menu bar text for consumed %; bitmap is only `[████░░]`.
       if (process.platform === 'darwin' && typeof mb.tray.setTitle === 'function') {
         const title = active && !active.error ? ` ${usageLabelForService(active)}` : '';
-        mb.tray.setTitle(title);
+        if (title !== lastTrayTitle) {
+          mb.tray.setTitle(title);
+          lastTrayTitle = title;
+        }
       }
 
       // Forward state to the open popover (no-op if window is hidden).
-      if (mb.window?.webContents) {
+      if (mb.window?.webContents && mb.window.isVisible()) {
         mb.window.webContents.send('usage-update', stateForRenderer());
       }
     });
@@ -191,6 +218,25 @@ ipcMain.handle('set-config', (_, incoming) => {
     }
   }
 
+  if ('anthropic_admin_api_key' in incoming) {
+    const v = incoming.anthropic_admin_api_key;
+    if (v && String(v).trim()) {
+      merged.anthropic_admin_api_key = String(v).trim();
+    } else {
+      delete merged.anthropic_admin_api_key;
+    }
+  }
+
+  if ('anthropic_api_spend_limit_usd' in incoming) {
+    const v = incoming.anthropic_api_spend_limit_usd;
+    if (v === '' || v == null) {
+      delete merged.anthropic_api_spend_limit_usd;
+    } else {
+      const n = parseFloat(String(v));
+      if (Number.isFinite(n) && n >= 0) merged.anthropic_api_spend_limit_usd = n;
+    }
+  }
+
   debug.logSettings('set-config', {
     claude_session_key: incoming.claude_session_key
       ? `${incoming.claude_session_key.includes(';') ? 'cookie header' : 'session key'} (length ${incoming.claude_session_key.length})`
@@ -207,6 +253,13 @@ ipcMain.handle('set-config', (_, incoming) => {
     cursor_cookie: incoming.cursor_cookie
       ? `updated (length ${incoming.cursor_cookie.length})`
       : 'unchanged',
+    anthropic_admin_api_key: incoming.anthropic_admin_api_key
+      ? `updated (length ${incoming.anthropic_admin_api_key.length})`
+      : 'unchanged',
+    anthropic_api_spend_limit_usd:
+      incoming.anthropic_api_spend_limit_usd !== undefined
+        ? incoming.anthropic_api_spend_limit_usd
+        : 'unchanged',
     hide_claude_gauge: incoming.hide_claude_gauge !== undefined ? !!incoming.hide_claude_gauge : 'unchanged',
     hide_openai_gauge: incoming.hide_openai_gauge !== undefined ? !!incoming.hide_openai_gauge : 'unchanged',
     hide_cursor_gauge: incoming.hide_cursor_gauge !== undefined ? !!incoming.hide_cursor_gauge : 'unchanged',
@@ -258,6 +311,8 @@ ipcMain.handle('resize', (_, height) => {
   const { screen } = require('electron');
   const maxH = Math.floor(screen.getPrimaryDisplay().workAreaSize.height * 0.92);
   const h = Math.min(Math.max(120, Math.round(height)), maxH);
+  if (h === lastWindowHeight) return;
+  lastWindowHeight = h;
   mb.window.setSize(320, h);
 });
 
