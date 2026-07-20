@@ -26,6 +26,9 @@ function gaugeHiddenOpenAI() {
 function gaugeHiddenCursor() {
   return !!store?.get('hide_cursor_gauge');
 }
+function gaugeHiddenCodex() {
+  return !!store?.get('hide_codex_gauge');
+}
 
 function buildTrayTooltip(state) {
   const bits = [];
@@ -59,6 +62,12 @@ function buildTrayTooltip(state) {
     }
     bits.push(c);
   }
+  if (state.codex && !state.codex.error && !gaugeHiddenCodex()) {
+    const g = Math.round(
+      state.codex.gaugeUtilization ?? state.codex.fiveHour?.utilization ?? state.codex.utilization ?? 0
+    );
+    bits.push(`Codex ${g}%`);
+  }
   return bits.length ? bits.join(' · ') : 'AI Usage';
 }
 
@@ -81,6 +90,7 @@ function stateForRenderer() {
       claude: !!store?.get('hide_claude_gauge'),
       openai: !!store?.get('hide_openai_gauge'),
       cursor: !!store?.get('hide_cursor_gauge'),
+      codex: !!store?.get('hide_codex_gauge'),
     },
   };
 }
@@ -218,6 +228,15 @@ ipcMain.handle('set-config', (_, incoming) => {
     }
   }
 
+  if ('codex_cookie' in incoming) {
+    const v = incoming.codex_cookie;
+    if (v && String(v).trim()) {
+      merged.codex_cookie = String(v).trim();
+    } else {
+      delete merged.codex_cookie;
+    }
+  }
+
   if ('anthropic_admin_api_key' in incoming) {
     const v = incoming.anthropic_admin_api_key;
     if (v && String(v).trim()) {
@@ -253,6 +272,9 @@ ipcMain.handle('set-config', (_, incoming) => {
     cursor_cookie: incoming.cursor_cookie
       ? `updated (length ${incoming.cursor_cookie.length})`
       : 'unchanged',
+    codex_cookie: incoming.codex_cookie
+      ? `updated (length ${incoming.codex_cookie.length})`
+      : 'unchanged',
     anthropic_admin_api_key: incoming.anthropic_admin_api_key
       ? `updated (length ${incoming.anthropic_admin_api_key.length})`
       : 'unchanged',
@@ -263,10 +285,12 @@ ipcMain.handle('set-config', (_, incoming) => {
     hide_claude_gauge: incoming.hide_claude_gauge !== undefined ? !!incoming.hide_claude_gauge : 'unchanged',
     hide_openai_gauge: incoming.hide_openai_gauge !== undefined ? !!incoming.hide_openai_gauge : 'unchanged',
     hide_cursor_gauge: incoming.hide_cursor_gauge !== undefined ? !!incoming.hide_cursor_gauge : 'unchanged',
+    hide_codex_gauge: incoming.hide_codex_gauge !== undefined ? !!incoming.hide_codex_gauge : 'unchanged',
   });
   if ('hide_claude_gauge' in incoming) merged.hide_claude_gauge = !!incoming.hide_claude_gauge;
   if ('hide_openai_gauge' in incoming) merged.hide_openai_gauge = !!incoming.hide_openai_gauge;
   if ('hide_cursor_gauge' in incoming) merged.hide_cursor_gauge = !!incoming.hide_cursor_gauge;
+  if ('hide_codex_gauge' in incoming) merged.hide_codex_gauge = !!incoming.hide_codex_gauge;
   store.setAll(merged);
 
   if (poller) {
@@ -297,6 +321,7 @@ ipcMain.handle('get-settings-diagnostics', () => {
       claude: svc(st.claude),
       openai: svc(st.openai),
       cursor: svc(st.cursor),
+      codex: svc(st.codex),
     },
   };
 });

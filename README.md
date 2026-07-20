@@ -1,6 +1,6 @@
 # AI Usage Bar
 
-macOS menubar app that shows a battery-style icon for whichever AI service is using quota right now (**Claude** web limits, **OpenAI** monthly spend, and/or **Cursor** plan usage). Click the icon to open the popover with percentages and reset times.
+macOS menubar app that shows a battery-style icon for whichever AI service is using quota right now (**Claude** web limits, **OpenAI** monthly spend, **Cursor** plan usage, and/or **Codex / ChatGPT Work** agentic limits). Click the icon to open the popover with percentages and reset times.
 
 ---
 
@@ -44,11 +44,21 @@ Wrap the cookie in **single quotes** — it contains **`;`** and the shell will 
 
 You should see **HTTP 200** and a parsed **utilization** percentage. **401** means the cookie is expired or invalid — log in again at [cursor.com](https://cursor.com) and copy a fresh `cookie` header.
 
+### Test Codex cookie / parsing (optional)
+
+From the repo root (requires network):
+
+```bash
+CODEX_TEST_COOKIE='paste full cookie header from chatgpt.com Network tab' npm run test:codex
+```
+
+Same quoting rules as Cursor. You should see **accessToken: ok** and parsed **5-hour / weekly** percentages.
+
 ---
 
 ## Add credentials
 
-You can configure **Claude** (web session and/or Console org), **OpenAI**, and/or **Cursor**. At least one is required for the app to show usage.
+You can configure **Claude** (web session and/or Console org), **OpenAI**, **Cursor**, and/or **Codex / ChatGPT Work**. At least one is required for the app to show usage.
 
 ### Claude (claude.ai web usage)
 
@@ -134,6 +144,24 @@ If you paste only the raw `WorkosCursorSessionToken` value (no `name=`), the app
 
 ---
 
+### Codex / ChatGPT Work (agentic usage)
+
+[Codex](https://help.openai.com/en/articles/11369540-using-codex-with-your-chatgpt-plan) and **ChatGPT Work** draw from the same **agentic usage** pool on your ChatGPT plan. OpenAI does not expose a public API key for that meter; the app uses your **chatgpt.com browser session**, same pattern as Claude and Cursor.
+
+1. Log in at **[chatgpt.com](https://chatgpt.com)** (Codex CLI / IDE extension sign-in uses the same account).
+2. **DevTools** → **Network** → reload or open **Codex** → select any request to **`chatgpt.com`**.
+3. **Headers** → **Request Headers** → copy the full **`cookie`** value.
+
+The cookie must include **`__Secure-next-auth.session-token`**. On many accounts NextAuth **shards** large session JWTs into **`.0`** and **`.1`** cookies — copy **both** from the Network tab (paste the full `cookie` header; do not merge the shards manually).
+
+4. Paste into **Settings → Codex / ChatGPT session (cookie)** and save.
+
+The app calls OpenAI’s undocumented **`GET /backend-api/wham/usage`** endpoint (after exchanging the cookie for a short-lived bearer token via **`/api/auth/session`**). The popover shows **5-hour** and **weekly** windows plus **credits balance** when your plan includes purchasable credits.
+
+**Note:** This is separate from **OpenAI API** monthly spend (platform.openai.com billing). Keep both configured if you use Codex on your ChatGPT plan **and** the OpenAI API.
+
+---
+
 ## Where settings are stored
 
 Configuration is saved as JSON next to the app’s other data:
@@ -152,9 +180,11 @@ You can edit `poll_interval_ms` there (default **90000** ms). Optional **`hide_*
   "openai_api_key": "sk-…",
   "openai_manual_limit": 20,
   "cursor_cookie": "WorkosCursorSessionToken=…",
+  "codex_cookie": "__Secure-next-auth.session-token.0=…; __Secure-next-auth.session-token.1=…",
   "hide_claude_gauge": false,
   "hide_openai_gauge": false,
-  "hide_cursor_gauge": false
+  "hide_cursor_gauge": false,
+  "hide_codex_gauge": false
 }
 ```
 
@@ -216,7 +246,7 @@ Until that is done, end users must use **Open Anyway** / **right‑click → Ope
 
 ## Polling and refresh
 
-- Default poll interval: **90 seconds** (Claude via session; OpenAI via API/billing-related calls; Cursor via cursor.com session).
+- Default poll interval: **90 seconds** (Claude via session; OpenAI via API/billing-related calls; Cursor via cursor.com session; Codex via chatgpt.com session).
 - Change interval with **`poll_interval_ms`** in `ai-usage-config.json` (see above).
 - Use the **refresh** control in the popover for an immediate pull.
 
@@ -229,6 +259,7 @@ Until that is done, end users must use **Open Anyway** / **right‑click → Ope
 | **macOS won’t open the app** (“damaged”, “can’t verify”, malware warning) | Builds are **unsigned** until Developer ID + notarization are configured. Use **System Settings → Privacy & Security → Open Anyway**, or **right‑click → Open**, or `xattr -dr com.apple.quarantine "/Applications/AI Usage.app"` then open again. |
 | **HTTP 403** on Claude | Paste the **full** `cookie` header from Network (not only `sessionKey`). Add **organization ID** if you have it. Ensure you’re on the latest build. |
 | **Cursor** errors or no % | Paste the full **`cookie`** header from a **cursor.com** Network request (must include session cookies). Log in again at cursor.com if expired. |
+| **Codex** errors or no % | Paste the full **`cookie`** header from **chatgpt.com** (include sharded **`__Secure-next-auth.session-token.0`** / **`.1`** if present). Log in again if expired. |
 | **Session expired** | Copy a fresh `sessionKey` or full cookie after logging in at claude.ai. |
 | **Nothing saves** | Use **Save & Refresh** in Settings. The back arrow does **not** save. If the Claude field shows bullets (`••••••••`), paste a **new** full value to replace the stored key. |
 | **Debug** | **Settings → Troubleshooting** shows config/log paths, recent errors, and a **Copy all** button. |

@@ -481,6 +481,15 @@ details.troubleshoot[open] > summary .troubleshoot-chevron {
       </div>
     </div>
 
+    <div class="field">
+      <label>Codex / ChatGPT session (cookie)</label>
+      <input type="password" id="codexCookie" placeholder="Full cookie header or session token" autocomplete="off" spellcheck="false"/>
+      <div class="field-hint">chatgpt.com → DevTools → Network → any request → copy the full <strong>cookie</strong> header. Needs <code>__Secure-next-auth.session-token</code> (often sharded as <code>.0</code> and <code>.1</code>). Covers Codex CLI, IDE extension, and ChatGPT Work limits.</div>
+      <div class="field-gauge">
+        <button type="button" class="gauge-link" data-gauge="codex" id="gaugeToggleCodex">hide</button>
+      </div>
+    </div>
+
     <button type="submit" class="save-btn" id="saveBtn">Save &amp; Refresh</button>
     <div class="field-hint" style="margin-top:8px;text-align:center;">Press <strong>Enter</strong> or click the button — the <strong>←</strong> back arrow does not save.</div>
 
@@ -592,6 +601,22 @@ function claudeConsoleApiRows(ca) {
   <div class="reset-label" style="padding-left:0">cost_report · may differ from Console</div>`;
 }
 
+/** Codex credits balance when API includes credits object */
+function codexCreditsRow(credits) {
+  if (!credits || !credits.hasCredits) return '';
+  if (credits.unlimited) {
+    return `<div class="progress-row progress-row--money">
+      <span class="progress-label">Credits</span>
+      <span class="progress-money">unlimited</span>
+    </div>`;
+  }
+  if (credits.balance == null) return '';
+  return `<div class="progress-row progress-row--money">
+    <span class="progress-label">Credits</span>
+    <span class="progress-money">$${credits.balance.toFixed(2)} balance</span>
+  </div>`;
+}
+
 // ── Render ───────────────────────────────────────────────────────────────────
 
 function render(state) {
@@ -602,9 +627,10 @@ function render(state) {
   const hasClaude   = !!state.claude && !gh.claude;
   const hasOpenAI   = !!state.openai && !gh.openai;
   const hasCursor   = !!state.cursor && !gh.cursor;
-  const anyConfigured = !!(state.claude || state.openai || state.cursor);
+  const hasCodex    = !!state.codex && !gh.codex;
+  const anyConfigured = !!(state.claude || state.openai || state.cursor || state.codex);
 
-  if (!hasClaude && !hasOpenAI && !hasCursor) {
+  if (!hasClaude && !hasOpenAI && !hasCursor && !hasCodex) {
     const html = anyConfigured
       ? `<div class="empty">All providers are hidden from the gauge.<br><a id="goSettings">Open Settings</a> to show them.</div>`
       : `<div class="empty">No services configured.<br><a id="goSettings">Open Settings</a> to add your keys.</div>`;
@@ -740,6 +766,41 @@ function render(state) {
     }
   }
 
+  if (hasCodex) {
+    cardCount++;
+    const x = state.codex;
+    if (x.error === 'auth_expired') {
+      html += `<div class="service-card">
+        <div class="service-header">
+          <span class="service-name">Codex</span>
+          <span class="error-badge auth">Session expired — update in Settings</span>
+        </div></div>`;
+    } else if (x.error) {
+      html += `<div class="service-card">
+        <div class="service-header">
+          <span class="service-name">Codex</span>
+          <span class="error-badge other">Connection error</span>
+        </div></div>`;
+    } else {
+      const plan = x.planType ? `<span class="service-detail">${escapeHtml(x.planType)}</span>` : '';
+      const detail = x.displayMessage ? `<span class="service-detail">${escapeHtml(x.displayMessage)}</span>` : plan;
+      const fh = x.fiveHour || {};
+      const sd = x.sevenDay || {};
+      const headerClass = x.displayMessage || x.planType ? 'service-header service-header--stacked' : 'service-header';
+      html += `<div class="service-card">
+        <div class="${headerClass}">
+          <span class="service-name">Codex</span>
+          ${detail}
+        </div>
+        ${progressRow('5-hour', fh.utilization || 0)}
+        ${resetLine(fh.resetsAt)}
+        ${progressRow('Weekly', sd.utilization || 0)}
+        ${resetLine(sd.resetsAt)}
+        ${codexCreditsRow(x.credits)}
+      </div>`;
+    }
+  }
+
   const signature = `cards:${html}`;
   if (signature === lastRenderSignature) return;
   lastRenderSignature = signature;
@@ -753,7 +814,9 @@ function render(state) {
     hasCursor && state.cursor && !state.cursor.error && state.cursor.onDemand ? 22 : 0;
   const claudeConsolePad =
     hasClaude && state.claude && !state.claude.error && state.claude.consoleApi ? 28 : 0;
-  resize(baseH + cardH + cursorDetailPad + cursorOnDemandPad + claudeConsolePad);
+  const codexCreditsPad =
+    hasCodex && state.codex && !state.codex.error && state.codex.credits?.hasCredits ? 22 : 0;
+  resize(baseH + cardH + cursorDetailPad + cursorOnDemandPad + claudeConsolePad + codexCreditsPad);
 }
 
 function gaugeVisibleLastFetched(state, key) {
@@ -761,6 +824,7 @@ function gaugeVisibleLastFetched(state, key) {
   if (key === 'claude' && gh.claude) return null;
   if (key === 'openai' && gh.openai) return null;
   if (key === 'cursor' && gh.cursor) return null;
+  if (key === 'codex' && gh.codex) return null;
   return state[key]?.lastFetched;
 }
 
@@ -798,6 +862,7 @@ function formatDiagnostics(d) {
   const c = d.services?.claude;
   const o = d.services?.openai;
   const u = d.services?.cursor;
+  const x = d.services?.codex;
   if (c) {
     const bits = [c.error ? `error=${c.error}` : 'ok'];
     if (c.sessionError) bits.push(`session=${c.sessionError}`);
@@ -814,6 +879,11 @@ function formatDiagnostics(d) {
       `Cursor: ${u.error ? `error=${u.error}` : 'ok'}${u.errorDetail ? ` | ${u.errorDetail}` : ''}`
     );
   } else lines.push('Cursor: (not configured)');
+  if (x) {
+    lines.push(
+      `Codex: ${x.error ? `error=${x.error}` : 'ok'}${x.errorDetail ? ` | ${x.errorDetail}` : ''}`
+    );
+  } else lines.push('Codex: (not configured)');
   if (d.logLines?.length) {
     lines.push('');
     lines.push('--- Recent log ---');
@@ -873,13 +943,14 @@ const GAUGE_CONFIG_KEY = {
   claude: 'hide_claude_gauge',
   openai: 'hide_openai_gauge',
   cursor: 'hide_cursor_gauge',
+  codex: 'hide_codex_gauge',
 };
 
-const GAUGE_LABEL = { claude: 'Claude', openai: 'OpenAI', cursor: 'Cursor' };
+const GAUGE_LABEL = { claude: 'Claude', openai: 'OpenAI', cursor: 'Cursor', codex: 'Codex' };
 
 function syncGaugeToggleLabels() {
   const gh = currentState.gaugeHidden || {};
-  [['claude', 'gaugeToggleClaude'], ['openai', 'gaugeToggleOpenai'], ['cursor', 'gaugeToggleCursor']].forEach(
+  [['claude', 'gaugeToggleClaude'], ['openai', 'gaugeToggleOpenai'], ['cursor', 'gaugeToggleCursor'], ['codex', 'gaugeToggleCodex']].forEach(
     ([name, id]) => {
       const el = document.getElementById(id);
       if (!el) return;
@@ -972,6 +1043,7 @@ async function saveSettingsAndClose() {
   const anth = document.getElementById('anthropicAdminKey').value.trim();
   const anthLim = document.getElementById('anthropicSpendLimit').value.trim();
   const cur = document.getElementById('cursorCookie').value.trim();
+  const cod = document.getElementById('codexCookie').value.trim();
   if (sk && sk !== '••••••••') incoming.claude_session_key = sk;
   incoming.claude_org_uuid = orgId;
   if (anth !== '••••••••') incoming.anthropic_admin_api_key = anth;
@@ -980,10 +1052,12 @@ async function saveSettingsAndClose() {
   if (ak && ak !== '••••••••') incoming.openai_api_key     = ak;
   if (lm) incoming.openai_manual_limit = parseFloat(lm);
   if (cur !== '••••••••') incoming.cursor_cookie = cur;
+  if (cod !== '••••••••') incoming.codex_cookie = cod;
   const gh = currentState.gaugeHidden || {};
   incoming.hide_claude_gauge = !!gh.claude;
   incoming.hide_openai_gauge = !!gh.openai;
   incoming.hide_cursor_gauge = !!gh.cursor;
+  incoming.hide_codex_gauge = !!gh.codex;
   await ipcRenderer.invoke('set-config', incoming);
   const state = await ipcRenderer.invoke('get-state');
   if (state) currentState = state;
@@ -1019,6 +1093,7 @@ document.getElementById('settingsForm').addEventListener('submit', (e) => {
   if (config.openai_api_key)     document.getElementById('openaiKey').value = '••••••••';
   if (config.openai_manual_limit) document.getElementById('openaiLimit').value = config.openai_manual_limit;
   if (config.cursor_cookie) document.getElementById('cursorCookie').value = '••••••••';
+  if (config.codex_cookie) document.getElementById('codexCookie').value = '••••••••';
 
   syncGaugeToggleLabels();
 
@@ -1040,7 +1115,7 @@ document.getElementById('settingsForm').addEventListener('submit', (e) => {
   });
 
   // Auto-open settings on first launch
-  if (!config.claude_session_key && !config.anthropic_admin_api_key && !config.openai_api_key && !config.cursor_cookie) {
+  if (!config.claude_session_key && !config.anthropic_admin_api_key && !config.openai_api_key && !config.cursor_cookie && !config.codex_cookie) {
     showSettings();
   }
 

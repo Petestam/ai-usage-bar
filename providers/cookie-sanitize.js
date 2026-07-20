@@ -62,4 +62,39 @@ function buildCursorCookieHeader(stored) {
   return parts.join('; ');
 }
 
-module.exports = { buildClaudeCookieHeader, buildCursorCookieHeader, isDevToolsCookieNoise };
+/**
+ * ChatGPT / Codex: __Secure-next-auth.session-token (often sharded as .0 / .1).
+ * Bare token → unsharded cookie; newlines allowed for extra cookies (cf_clearance, etc.).
+ */
+function buildChatGptCookieHeader(stored) {
+  let s = stored.trim();
+  if (/^cookie\s*:/i.test(s)) {
+    s = s.replace(/^cookie\s*:\s*/i, '').trim();
+  }
+  const segments = s.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
+  const allParts = [];
+  for (const seg of segments) {
+    if (!seg.includes('=')) {
+      allParts.push(`__Secure-next-auth.session-token=${seg}`);
+      continue;
+    }
+    const parts = seg
+      .split(';')
+      .map((x) => x.trim())
+      .filter((p) => p && !isDevToolsCookieNoise(p));
+    allParts.push(...parts);
+  }
+  if (allParts.length === 0) {
+    const m = s.match(/__Secure-next-auth\.session-token(?:\.\d+)?\s*=\s*([^;]+)/i);
+    if (m) return `__Secure-next-auth.session-token=${m[1].trim()}`;
+    return s;
+  }
+  return allParts.join('; ');
+}
+
+module.exports = {
+  buildClaudeCookieHeader,
+  buildCursorCookieHeader,
+  buildChatGptCookieHeader,
+  isDevToolsCookieNoise,
+};

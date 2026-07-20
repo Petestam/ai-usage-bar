@@ -1,6 +1,7 @@
 const ClaudeProvider  = require('./providers/claude');
 const OpenAIProvider  = require('./providers/openai');
 const CursorProvider  = require('./providers/cursor');
+const CodexProvider   = require('./providers/codex');
 
 const ACTIVE_WINDOW_MS = 30 * 60 * 1000; // 30 min of no change = idle
 const MIN_POLL_MS = 15 * 1000;
@@ -12,7 +13,8 @@ class Poller {
     this.claude   = new ClaudeProvider(store);
     this.openai   = new OpenAIProvider(store);
     this.cursor   = new CursorProvider(store);
-    this.state    = { claude: null, openai: null, cursor: null };
+    this.codex    = new CodexProvider(store);
+    this.state    = { claude: null, openai: null, cursor: null, codex: null };
     this.timer    = null;
     this._pollInFlight = false;
   }
@@ -21,16 +23,18 @@ class Poller {
     if (this._pollInFlight) return;
     this._pollInFlight = true;
     try {
-      const [c, o, u] = await Promise.allSettled([
+      const [c, o, u, x] = await Promise.allSettled([
         this.store.get('claude_session_key') || this.store.get('anthropic_admin_api_key')
           ? this.claude.fetch()
           : Promise.resolve(null),
         this.store.get('openai_api_key')     ? this.openai.fetch() : Promise.resolve(null),
         this.store.get('cursor_cookie')      ? this.cursor.fetch() : Promise.resolve(null),
+        this.store.get('codex_cookie')       ? this.codex.fetch() : Promise.resolve(null),
       ]);
       if (c.status === 'fulfilled' && c.value) this.state.claude = c.value;
       if (o.status === 'fulfilled' && o.value) this.state.openai = o.value;
       if (u.status === 'fulfilled' && u.value) this.state.cursor = u.value;
+      if (x.status === 'fulfilled' && x.value) this.state.codex = x.value;
       this.onUpdate(this.state);
     } finally {
       this._pollInFlight = false;
@@ -45,12 +49,13 @@ class Poller {
     if (serviceName === 'claude') return !this.store.get('hide_claude_gauge', false);
     if (serviceName === 'openai') return !this.store.get('hide_openai_gauge', false);
     if (serviceName === 'cursor') return !this.store.get('hide_cursor_gauge', false);
+    if (serviceName === 'codex') return !this.store.get('hide_codex_gauge', false);
     return true;
   }
 
   activeService() {
     const now  = Date.now();
-    const svcs = [this.state.claude, this.state.openai, this.state.cursor]
+    const svcs = [this.state.claude, this.state.openai, this.state.cursor, this.state.codex]
       .filter(
         (s) =>
           s &&
