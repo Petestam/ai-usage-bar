@@ -643,15 +643,13 @@ function render(state) {
       container.innerHTML = html;
     }
     document.getElementById('goSettings')?.addEventListener('click', showSettings);
-    resize(160);
+    resizeMainView();
     return;
   }
 
   let html     = '';
-  let cardCount = 0;
 
   if (hasClaude) {
-    cardCount++;
     const c = state.claude;
     if (c.error === 'auth_expired') {
       const authMsg =
@@ -698,7 +696,6 @@ function render(state) {
   }
 
   if (hasOpenAI) {
-    cardCount++;
     const o = state.openai;
     if (o.error === 'auth_expired') {
       html += `<div class="service-card">
@@ -726,7 +723,6 @@ function render(state) {
   }
 
   if (hasCursor) {
-    cardCount++;
     const u = state.cursor;
     if (u.error === 'auth_expired') {
       html += `<div class="service-card">
@@ -767,7 +763,6 @@ function render(state) {
   }
 
   if (hasCodex) {
-    cardCount++;
     const x = state.codex;
     if (x.error === 'auth_expired') {
       html += `<div class="service-card">
@@ -805,18 +800,7 @@ function render(state) {
   if (signature === lastRenderSignature) return;
   lastRenderSignature = signature;
   container.innerHTML = html;
-
-  const baseH = 42 + 36;
-  const cardH = cardCount <= 1 ? 110 : Math.min(320, 70 + cardCount * 88);
-  const cursorDetailPad =
-    hasCursor && state.cursor && !state.cursor.error && state.cursor.displayMessage ? 28 : 0;
-  const cursorOnDemandPad =
-    hasCursor && state.cursor && !state.cursor.error && state.cursor.onDemand ? 22 : 0;
-  const claudeConsolePad =
-    hasClaude && state.claude && !state.claude.error && state.claude.consoleApi ? 28 : 0;
-  const codexCreditsPad =
-    hasCodex && state.codex && !state.codex.error && state.codex.credits?.hasCredits ? 22 : 0;
-  resize(baseH + cardH + cursorDetailPad + cursorOnDemandPad + claudeConsolePad + codexCreditsPad);
+  resizeMainView();
 }
 
 function gaugeVisibleLastFetched(state, key) {
@@ -842,10 +826,30 @@ function updateTimestamp(state) {
     gaugeVisibleLastFetched(state, 'claude'),
     gaugeVisibleLastFetched(state, 'openai'),
     gaugeVisibleLastFetched(state, 'cursor'),
+    gaugeVisibleLastFetched(state, 'codex'),
   ].filter(Boolean);
   if (!times.length) { el.textContent = '—'; return; }
   const ago = Math.round((Date.now() - Math.max(...times)) / 60000);
   el.textContent = ago < 1 ? 'just now' : `${ago}m ago`;
+}
+
+/** Size popover to fit rendered main-view content (header + cards + footer). */
+function resizeMainView() {
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      const main = document.getElementById('mainView');
+      if (!main || main.classList.contains('hidden')) return;
+      const header = main.querySelector('.header');
+      const footer = main.querySelector('.footer');
+      const container = document.getElementById('servicesContainer');
+      const total =
+        (header?.offsetHeight || 0) +
+        (container?.offsetHeight || 0) +
+        (footer?.offsetHeight || 0) +
+        2;
+      resize(Math.max(160, total));
+    });
+  });
 }
 
 function resize(h) {
