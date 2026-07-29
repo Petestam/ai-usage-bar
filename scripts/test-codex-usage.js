@@ -11,6 +11,30 @@ const axios = require('axios');
 const { buildChatGptCookieHeader } = require('../providers/cookie-sanitize');
 const { parseWhamUsage } = require('../providers/codex-parse');
 
+function chatgptAccountId(accessToken) {
+  try {
+    const part = accessToken.split('.')[1];
+    if (!part) return null;
+    const pad = (4 - (part.length % 4)) % 4;
+    const b64 = part.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat(pad);
+    const json = JSON.parse(Buffer.from(b64, 'base64').toString('utf8'));
+    return json['https://api.openai.com/auth']?.chatgpt_account_id || null;
+  } catch {
+    return null;
+  }
+}
+
+function dumpWindow(name, w) {
+  if (!w) { console.log(name, ': null'); return; }
+  console.log(name + ':', {
+    used_percent: w.used_percent,
+    limit_window_hours: w.limit_window_seconds == null ? null : +(w.limit_window_seconds / 3600).toFixed(2),
+    reset_after_hours: w.reset_after_seconds == null ? null : +(w.reset_after_seconds / 3600).toFixed(2),
+    reset_after_days: w.reset_after_seconds == null ? null : +(w.reset_after_seconds / 86400).toFixed(2),
+    reset_at: w.reset_at,
+  });
+}
+
 const cookie = (process.env.CODEX_TEST_COOKIE || process.argv[2] || '').trim();
 if (!cookie) {
   console.error("Usage: CODEX_TEST_COOKIE='full cookie' npm run test:codex");
@@ -41,9 +65,17 @@ const browserHeaders = {
       process.exit(2);
     }
     console.log('accessToken: ok (length', token.length, ')');
+    const accountId = chatgptAccountId(token);
+    console.log('ChatGPT-Account-Id:', accountId || '(not in token)');
+
+    const usageHeaders = {
+      ...browserHeaders,
+      Authorization: `Bearer ${token}`,
+    };
+    if (accountId) usageHeaders['ChatGPT-Account-Id'] = accountId;
 
     const usage = await axios.get('https://chatgpt.com/backend-api/wham/usage', {
-      headers: { ...browserHeaders, Authorization: `Bearer ${token}` },
+      headers: usageHeaders,
       timeout: 20000,
       validateStatus: () => true,
     });
@@ -56,6 +88,18 @@ const browserHeaders = {
       console.log('Top-level keys:', Object.keys(usage.data));
       if (usage.data.rate_limit) {
         console.log('rate_limit keys:', Object.keys(usage.data.rate_limit));
+        dumpWindow('primary_window', usage.data.rate_limit.primary_window);
+        dumpWindow('secondary_window', usage.data.rate_limit.secondary_window);
+      }
+      if (usage.data.spend_control?.individual_limit) {
+        dumpWindow('spend_control.individual_limit', usage.data.spend_control.individual_limit);
+      }
+      if (Array.isArray(usage.data.additional_rate_limits) && usage.data.additional_rate_limits.length) {
+        console.log('additional_rate_limits:', usage.data.additional_rate_limits.length);
+        usage.data.additional_rate_limits.forEach((x, i) => {
+          console.log(' extra', i, x.limit_name || x.metered_feature);
+          dumpWindow('  primary', x.rate_limit?.primary_window);
+        });
       }
     }
     const parsed = parseWhamUsage(usage.data);

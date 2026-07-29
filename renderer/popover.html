@@ -537,6 +537,14 @@ function formatReset(date) {
   return h > 0 ? `resets in ${h}h ${m}m` : `resets in ${m}m`;
 }
 
+function formatDuration(seconds) {
+  const s = Math.max(0, Math.round(Number(seconds) || 0));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  if (h >= 24) { const days = Math.floor(h / 24); return `${days}d ${h % 24}h`; }
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+
 function fillClass(util) {
   if (util >= 75) return 'fill-red';
   if (util >= 50) return 'fill-amber';
@@ -556,6 +564,79 @@ function progressRow(label, util) {
 function resetLine(date) {
   const str = formatReset(date);
   return str ? `<div class="reset-label">${str}</div>` : '';
+}
+
+/** Codex: anchor countdown to last fetch + reset_after_seconds when available. */
+function codexResetAt(window, lastFetched) {
+  if (!window) return null;
+  const after = Number(window.resetAfterSeconds);
+  const fetched = Number(lastFetched);
+  if (Number.isFinite(after) && after >= 0 && Number.isFinite(fetched) && fetched > 0) {
+    return new Date(fetched + after * 1000);
+  }
+  return window.resetsAt ? new Date(window.resetsAt) : null;
+}
+
+/** Deduped Codex windows for display (primary, secondary, extras). */
+function codexDisplayWindows(codex) {
+  const rows = [];
+  const keyOf = (w) =>
+    `${w.label || ''}|${w.limitWindowSeconds ?? ''}|${w.resetAfterSeconds ?? ''}|${w.utilization ?? ''}`;
+  const seen = new Set();
+  const add = (w) => {
+    if (!w) return;
+    const k = keyOf(w);
+    if (seen.has(k)) return;
+    seen.add(k);
+    rows.push(w);
+  };
+  add(codex.fiveHour);
+  add(codex.sevenDay);
+  for (const w of codex.windows || []) add(w);
+  rows.sort((a, b) => (a.limitWindowSeconds ?? 1e12) - (b.limitWindowSeconds ?? 1e12));
+  return rows;
+}
+
+/**
+ * Rolling windows (esp. team weekly-only) free capacity continuously as older
+ * usage ages out — "resets in 6d" is the full clear, not when you can use again.
+ * When our poll-built estimator has a projection, prefer that.
+ */
+function codexWindowNote(w, lastFetched) {
+  const util = w.utilization || 0;
+  const lim = Number(w.limitWindowSeconds);
+  const after = Number(w.resetAfterSeconds);
+  const isLong = Number.isFinite(lim) && lim >= 86400;
+  const rolling =
+    w.rolling ||
+    (isLong && Number.isFinite(after) && (Math.abs(lim - after) < 3600 || after / lim > 0.95));
+
+  const estMs = Number(w.estimatedRecoveryMs);
+  if (Number.isFinite(estMs) && estMs > Date.now()) {
+    const when = formatReset(new Date(estMs));
+    if (when) {
+      const to = w.estimatedToUtil != null ? ` → ~${w.estimatedToUtil}%` : '';
+      return `<div class="reset-label">est. ${when.replace(/^resets /, '')}${to}</div>`;
+    }
+  }
+
+  if (rolling && isLong && util < 75) {
+    const hint =
+      (w.rollingSampleCount || 0) < 2
+        ? 'rolling · learning from polls…'
+        : 'rolling · capacity frees as older usage ages out';
+    return `<div class="reset-label">${hint}</div>`;
+  }
+  if (rolling && isLong && util >= 75) {
+    const clear = formatDuration(after);
+    return `<div class="reset-label">rolling · full clear in ${clear} (partial recovery sooner)</div>`;
+  }
+  return resetLine(codexResetAt(w, lastFetched));
+}
+
+function codexWindowBlock(w, lastFetched) {
+  const label = w.label || 'Limit';
+  return `${progressRow(label, w.utilization || 0)}${codexWindowNote(w, lastFetched)}`;
 }
 
 /** Cursor on-demand spend (USD) when API includes spendLimitUsage */
@@ -779,18 +860,16 @@ function render(state) {
     } else {
       const plan = x.planType ? `<span class="service-detail">${escapeHtml(x.planType)}</span>` : '';
       const detail = x.displayMessage ? `<span class="service-detail">${escapeHtml(x.displayMessage)}</span>` : plan;
-      const fh = x.fiveHour || {};
-      const sd = x.sevenDay || {};
       const headerClass = x.displayMessage || x.planType ? 'service-header service-header--stacked' : 'service-header';
+      const windowBlocks = codexDisplayWindows(x)
+        .map((w) => codexWindowBlock(w, x.lastFetched))
+        .join('');
       html += `<div class="service-card">
         <div class="${headerClass}">
           <span class="service-name">Codex</span>
           ${detail}
         </div>
-        ${progressRow('5-hour', fh.utilization || 0)}
-        ${resetLine(fh.resetsAt)}
-        ${progressRow('Weekly', sd.utilization || 0)}
-        ${resetLine(sd.resetsAt)}
+        ${windowBlocks}
         ${codexCreditsRow(x.credits)}
       </div>`;
     }
@@ -1126,8 +1205,14 @@ document.getElementById('settingsForm').addEventListener('submit', (e) => {
   document.getElementById('troubleshootDetails')?.addEventListener('toggle', resizeSettingsWindow);
 })();
 
-// Keep "X ago" timestamp ticking
-setInterval(() => updateTimestamp(currentState), 60000);
+// Keep "X ago" and reset countdowns ticking between polls
+setInterval(() => {
+  updateTimestamp(currentState);
+  if (!document.getElementById('settingsView').classList.contains('visible')) {
+    lastRenderSignature = null;
+    render(currentState);
+  }
+}, 60000);
 </script>
 </body>
 </html>

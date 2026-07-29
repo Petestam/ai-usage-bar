@@ -142,8 +142,8 @@ app.whenReady().then(() => {
     lastTrayTitle = '';
 
     poller = new Poller(store, (state) => {
-      // Update tray icon with the active service's battery level + usage label.
-      // If nothing is active, show idle (dim battery, no label).
+      // Update tray icon with the active service's capacity ring + in-icon %.
+      // If nothing is active, show idle (dim empty ring).
       const active = poller.activeService();
       const iconKey = active && !active.error
         ? `${active.service}:${usageLabelForService(active)}`
@@ -163,13 +163,10 @@ app.whenReady().then(() => {
           lastTrayTooltip = tip;
         }
       }
-      // macOS: native menu bar text for consumed %; bitmap is only `[████░░]`.
-      if (process.platform === 'darwin' && typeof mb.tray.setTitle === 'function') {
-        const title = active && !active.error ? ` ${usageLabelForService(active)}` : '';
-        if (title !== lastTrayTitle) {
-          mb.tray.setTitle(title);
-          lastTrayTitle = title;
-        }
+      // % lives inside the ring icon — keep tray title empty to save menubar space.
+      if (process.platform === 'darwin' && typeof mb.tray.setTitle === 'function' && lastTrayTitle !== '') {
+        mb.tray.setTitle('');
+        lastTrayTitle = '';
       }
 
       // Forward state to the open popover (no-op if window is hidden).

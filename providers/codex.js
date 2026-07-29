@@ -6,6 +6,9 @@ const debug = require('../debug');
 const { canUseElectronNet, netGet } = require('./claude-net');
 const { buildChatGptCookieHeader } = require('./cookie-sanitize');
 const { parseWhamUsage } = require('./codex-parse');
+const { RollingUtilEstimator } = require('./codex-rolling');
+
+const ROLLING_STORE_KEY = 'codex_rolling_estimators';
 
 const BROWSER_HEADERS = {
   Accept:            'application/json, text/plain, */*',
@@ -72,12 +75,130 @@ async function exchangeSessionToken(storedCookie) {
   return token;
 }
 
+function chatgptAccountId(accessToken) {
+  try {
+    const part = accessToken.split('.')[1];
+    if (!part) return null;
+    const pad = (4 - (part.length % 4)) % 4;
+    const b64 = part.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat(pad);
+    const json = JSON.parse(Buffer.from(b64, 'base64').toString('utf8'));
+    return json['https://api.openai.com/auth']?.chatgpt_account_id || null;
+  } catch {
+    return null;
+  }
+}
+
+function usageHeaders(accessToken) {
+  const headers = { ...BROWSER_HEADERS, Authorization: `Bearer ${accessToken}` };
+  const accountId = chatgptAccountId(accessToken);
+  if (accountId) headers['ChatGPT-Account-Id'] = accountId;
+  return headers;
+}
+
+function logWindowSummary(parsed, raw) {
+  const row = (w) =>
+    w
+      ? {
+          label: w.label,
+          util: w.utilization,
+          windowH: w.limitWindowSeconds == null ? null : +(w.limitWindowSeconds / 3600).toFixed(2),
+          resetH: w.resetAfterSeconds == null ? null : +(w.resetAfterSeconds / 3600).toFixed(2),
+        }
+      : null;
+  const rl = raw?.rate_limit;
+  debug.logSettings('Codex usage windows:', {
+    plan: parsed.planType,
+    primary: row(parsed.fiveHour),
+    secondary: row(parsed.sevenDay),
+    all: (parsed.windows || []).map(row),
+    rawPrimary: rl?.primary_window
+      ? {
+          used: rl.primary_window.used_percent,
+          limit_s: rl.primary_window.limit_window_seconds,
+          after_s: rl.primary_window.reset_after_seconds,
+          reset_at: rl.primary_window.reset_at,
+        }
+      : null,
+    rawSecondary: rl?.secondary_window
+      ? {
+          used: rl.secondary_window.used_percent,
+          limit_s: rl.secondary_window.limit_window_seconds,
+          after_s: rl.secondary_window.reset_after_seconds,
+          reset_at: rl.secondary_window.reset_at,
+        }
+      : null,
+    additional: Array.isArray(raw?.additional_rate_limits)
+      ? raw.additional_rate_limits.map((x) => ({
+          name: x.limit_name || x.metered_feature,
+          primary: x.rate_limit?.primary_window
+            ? {
+                used: x.rate_limit.primary_window.used_percent,
+                limit_s: x.rate_limit.primary_window.limit_window_seconds,
+                after_s: x.rate_limit.primary_window.reset_after_seconds,
+              }
+            : null,
+        }))
+      : [],
+  });
+}
+
 class CodexProvider {
   constructor(store) {
     this.store       = store;
     this.lastData    = null;
     this.lastFetched = null;
     this.changeRate  = 0;
+    /** @type {Map<string, import('./codex-rolling').RollingUtilEstimator>} */
+    this.estimators  = new Map();
+    this._loadEstimators();
+  }
+
+  _loadEstimators() {
+    const raw = this.store.get(ROLLING_STORE_KEY);
+    if (!raw || typeof raw !== 'object') return;
+    for (const [key, data] of Object.entries(raw)) {
+      const est = RollingUtilEstimator.fromJSON(data);
+      if (est) this.estimators.set(key, est);
+    }
+  }
+
+  _saveEstimators() {
+    const out = {};
+    for (const [key, est] of this.estimators) out[key] = est.toJSON();
+    this.store.set(ROLLING_STORE_KEY, out);
+  }
+
+  _estimatorKey(w) {
+    return `${w.label || 'window'}:${w.limitWindowSeconds || 0}`;
+  }
+
+  /** Observe util + attach estimatedRecoveryMs when we can project a drop. */
+  _applyRolling(windows, nowMs) {
+    if (!Array.isArray(windows)) return;
+    let dirty = false;
+    for (const w of windows) {
+      if (!w || !w.limitWindowSeconds || w.limitWindowSeconds < 3600) continue;
+      const key = this._estimatorKey(w);
+      let est = this.estimators.get(key);
+      if (!est || est.windowSeconds !== w.limitWindowSeconds) {
+        est = new RollingUtilEstimator({ windowSeconds: w.limitWindowSeconds });
+        this.estimators.set(key, est);
+      }
+      est.observe(w.utilization ?? 0, nowMs);
+      dirty = true;
+
+      const eta = est.etaDrop({ dropPoints: 1, nowMs });
+      if (eta && eta.at > nowMs) {
+        w.estimatedRecoveryMs = eta.at;
+        w.estimatedFromUtil = Math.round(eta.fromUtil);
+        w.estimatedToUtil = Math.round(Math.max(0, eta.toUtil));
+        w.rollingSampleCount = est.events.length;
+      } else {
+        w.estimatedRecoveryMs = null;
+        w.rollingSampleCount = est.events.length;
+      }
+    }
+    if (dirty) this._saveEstimators();
   }
 
   async fetch() {
@@ -88,7 +209,7 @@ class CodexProvider {
       const accessToken = await exchangeSessionToken(cookie);
       const resp = await chatgptGet(
         'https://chatgpt.com/backend-api/wham/usage',
-        { ...BROWSER_HEADERS, Authorization: `Bearer ${accessToken}` },
+        usageHeaders(accessToken),
         15000
       );
 
@@ -97,6 +218,7 @@ class CodexProvider {
         debug.logSettings('Codex: unexpected wham/usage shape', Object.keys(resp.data || {}));
         throw new Error('Unexpected usage response');
       }
+      logWindowSummary(parsed, resp.data);
 
       const now = Date.now();
       if (this.lastData && this.lastFetched) {
@@ -108,11 +230,27 @@ class CodexProvider {
       this.lastData = { fiveHourUtil: parsed.fiveHour?.utilization ?? 0 };
       this.lastFetched = now;
 
+      const displayWindows = [];
+      const seen = new Set();
+      const add = (w) => {
+        if (!w) return;
+        const k = `${w.label}|${w.limitWindowSeconds}|${w.utilization}`;
+        if (seen.has(k)) return;
+        seen.add(k);
+        displayWindows.push(w);
+      };
+      add(parsed.fiveHour);
+      add(parsed.sevenDay);
+      for (const w of parsed.windows || []) add(w);
+
+      this._applyRolling(displayWindows, now);
+
       return {
         service:          'codex',
         label:            'Codex',
         fiveHour:         parsed.fiveHour,
         sevenDay:         parsed.sevenDay,
+        windows:          displayWindows,
         gaugeUtilization: parsed.gaugeUtilization,
         utilization:      parsed.utilization,
         planType:         parsed.planType,

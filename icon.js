@@ -1,95 +1,172 @@
 const { nativeImage } = require('electron');
 
-// Bitmap: `[████░░]` only — consumed % is shown via `tray.setTitle` on macOS (native text).
+// Monochrome capacity ring with % digits inside — frees menubar title space.
+// Black+alpha template image so macOS tints it for light/dark.
 const SCALE = 2;
+const CANVAS_W = 22;
 const CANVAS_H = 22;
-const SEGMENTS = 6;
-const SEG_W = 3;
-const SEG_GAP = 1;
-const SEG_H = 10;
-const SEG_Y = 6;
-const BAR_START_X = 4;
-const RIGHT_BRACKET_W = 2;
-const CANVAS_PAD_RIGHT = 1;
 
-const BLACK = '#000000';
-const TRACK = '#AEAEB2';
-const IDLE = '#8E8E93';
+const CX = CANVAS_W / 2;
+const CY = CANVAS_H / 2;
+const RADIUS = 9.15;
+const STROKE = 2.05;
+
+// Compact 3×5 digit glyphs (rows of on/off bits).
+const GLYPHS = {
+  0: ['111', '101', '101', '101', '111'],
+  1: ['010', '010', '010', '010', '010'],
+  2: ['111', '001', '111', '100', '111'],
+  3: ['111', '001', '111', '001', '111'],
+  4: ['101', '101', '111', '001', '001'],
+  5: ['111', '100', '111', '001', '111'],
+  6: ['111', '100', '111', '101', '111'],
+  7: ['111', '001', '001', '001', '001'],
+  8: ['111', '101', '111', '101', '111'],
+  9: ['111', '101', '111', '001', '111'],
+};
+
 const ICON_CACHE = new Map();
 
-function hexToRgba(hex, alpha = 255) {
-  const normalized = hex.replace('#', '');
-  const n = parseInt(normalized, 16);
-  return {
-    r: (n >> 16) & 255,
-    g: (n >> 8) & 255,
-    b: n & 255,
-    a: alpha,
-  };
+function clamp01(v) {
+  return v < 0 ? 0 : v > 1 ? 1 : v;
+}
+
+function coverage(dist) {
+  return clamp01(0.5 - dist * SCALE);
+}
+
+/** 0 at 12 o'clock, clockwise positive. */
+function sweepAngle(lx, ly) {
+  let a = Math.atan2(lx - CX, CY - ly);
+  if (a < 0) a += Math.PI * 2;
+  return a;
 }
 
 function makeBitmap(width, height) {
   const bytes = Buffer.alloc(width * height * 4, 0);
-  function fillRect(x, y, w, h, c) {
-    const x0 = Math.max(0, Math.floor(x));
-    const y0 = Math.max(0, Math.floor(y));
-    const x1 = Math.min(width, Math.ceil(x + w));
-    const y1 = Math.min(height, Math.ceil(y + h));
+
+  function stamp(px, py, alpha) {
+    if (alpha <= 0) return;
+    const x = Math.floor(px);
+    const y = Math.floor(py);
+    if (x < 0 || y < 0 || x >= width || y >= height) return;
+    const i = (y * width + x) * 4;
+    const a = Math.round(Math.min(255, Math.max(bytes[i + 3], alpha * 255)));
+    bytes[i] = 0;
+    bytes[i + 1] = 0;
+    bytes[i + 2] = 0;
+    bytes[i + 3] = a;
+  }
+
+  /** Soft filled circle in logical coords. */
+  function fillCircle(lx, ly, r, alpha) {
+    const pad = 1.25 / SCALE;
+    const x0 = Math.floor((lx - r - pad) * SCALE);
+    const y0 = Math.floor((ly - r - pad) * SCALE);
+    const x1 = Math.ceil((lx + r + pad) * SCALE);
+    const y1 = Math.ceil((ly + r + pad) * SCALE);
     for (let py = y0; py < y1; py++) {
       for (let px = x0; px < x1; px++) {
-        const i = (py * width + px) * 4;
-        bytes[i] = c.r;
-        bytes[i + 1] = c.g;
-        bytes[i + 2] = c.b;
-        bytes[i + 3] = c.a;
+        const dx = (px + 0.5) / SCALE - lx;
+        const dy = (py + 0.5) / SCALE - ly;
+        const a = coverage(Math.sqrt(dx * dx + dy * dy) - r) * alpha;
+        if (a > 0) stamp(px, py, a);
       }
     }
   }
-  return { bytes, fillRect };
+
+  return { bytes, stamp, fillCircle };
+}
+
+function paintRing(bitmap, util, trackA, fillA) {
+  const half = STROKE / 2;
+  const pad = STROKE + 1.5 / SCALE;
+  const x0 = Math.floor((CX - RADIUS - pad) * SCALE);
+  const y0 = Math.floor((CY - RADIUS - pad) * SCALE);
+  const x1 = Math.ceil((CX + RADIUS + pad) * SCALE);
+  const y1 = Math.ceil((CY + RADIUS + pad) * SCALE);
+  const fillSweep = (Math.max(0, Math.min(100, util)) / 100) * Math.PI * 2;
+
+  for (let py = y0; py < y1; py++) {
+    for (let px = x0; px < x1; px++) {
+      const lx = (px + 0.5) / SCALE;
+      const ly = (py + 0.5) / SCALE;
+      const dx = lx - CX;
+      const dy = ly - CY;
+      const dist = Math.abs(Math.sqrt(dx * dx + dy * dy) - RADIUS) - half;
+      const edge = coverage(dist);
+      if (edge <= 0) continue;
+
+      let a = trackA;
+      if (fillA > 0 && fillSweep > 0) {
+        const ang = sweepAngle(lx, ly);
+        const tip = clamp01((fillSweep - ang) * RADIUS * 1.4 + 0.5);
+        a = Math.max(a, fillA * tip);
+      }
+      bitmap.stamp(px, py, edge * a);
+    }
+  }
+}
+
+function paintDigits(bitmap, text, alpha) {
+  const n = text.length;
+  // Slightly tighter for "100".
+  const cell = n >= 3 ? 1.15 : 1.45;
+  const gap = n >= 3 ? 0.55 : 0.7;
+  const glyphW = 3 * cell;
+  const glyphH = 5 * cell;
+  const totalW = n * glyphW + (n - 1) * gap;
+  let x = CX - totalW / 2;
+  const y = CY - glyphH / 2 + 0.15;
+  const dotR = cell * 0.42;
+
+  for (const ch of text) {
+    const rows = GLYPHS[ch];
+    if (!rows) continue;
+    for (let row = 0; row < 5; row++) {
+      for (let col = 0; col < 3; col++) {
+        if (rows[row][col] !== '1') continue;
+        bitmap.fillCircle(
+          x + (col + 0.5) * cell,
+          y + (row + 0.5) * cell,
+          dotR,
+          alpha
+        );
+      }
+    }
+    x += glyphW + gap;
+  }
 }
 
 function renderBatteryBitmap(consumedPercent, status = 'active') {
   const isIdle = status === 'idle';
   const util = isIdle ? 0 : Math.max(0, Math.min(100, consumedPercent));
-  const filled = Math.round((util / 100) * SEGMENTS);
-  const color = hexToRgba(isIdle ? IDLE : BLACK);
-  const trackRgba = hexToRgba(TRACK);
+  const bitmap = makeBitmap(CANVAS_W * SCALE, CANVAS_H * SCALE);
 
-  const rightX = BAR_START_X + SEGMENTS * (SEG_W + SEG_GAP) - SEG_GAP + 1;
-  const rightBracketRight = rightX + RIGHT_BRACKET_W;
-  const canvasW = Math.ceil(rightBracketRight + CANVAS_PAD_RIGHT);
-
-  const bitmap = makeBitmap(canvasW * SCALE, CANVAS_H * SCALE);
-
-  bitmap.fillRect(0 * SCALE, 5 * SCALE, 2 * SCALE, 12 * SCALE, color);
-  bitmap.fillRect(0 * SCALE, 5 * SCALE, 3 * SCALE, 2 * SCALE, color);
-  bitmap.fillRect(0 * SCALE, 15 * SCALE, 3 * SCALE, 2 * SCALE, color);
-
-  for (let i = 0; i < SEGMENTS; i++) {
-    const x = BAR_START_X + i * (SEG_W + SEG_GAP);
-    const fill = !isIdle && i < filled ? color : trackRgba;
-    bitmap.fillRect(x * SCALE, SEG_Y * SCALE, SEG_W * SCALE, SEG_H * SCALE, fill);
+  paintRing(bitmap, util, isIdle ? 0.28 : 0.2, isIdle ? 0 : 0.95);
+  if (!isIdle) {
+    paintDigits(bitmap, String(Math.round(util)), 0.92);
   }
 
-  bitmap.fillRect(rightX * SCALE, 5 * SCALE, 2 * SCALE, 12 * SCALE, color);
-  bitmap.fillRect((rightX - 2) * SCALE, 5 * SCALE, 3 * SCALE, 2 * SCALE, color);
-  bitmap.fillRect((rightX - 2) * SCALE, 15 * SCALE, 3 * SCALE, 2 * SCALE, color);
-
-  return nativeImage.createFromBitmap(bitmap.bytes, {
-    width: canvasW * SCALE,
+  const img = nativeImage.createFromBitmap(bitmap.bytes, {
+    width: CANVAS_W * SCALE,
     height: CANVAS_H * SCALE,
     scaleFactor: SCALE,
   });
+  if (typeof img.setTemplateImage === 'function') {
+    img.setTemplateImage(true);
+  }
+  return img;
 }
 
 function createBatteryIcon(consumedPercent, status = 'active') {
   const isIdle = status === 'idle';
   const util = isIdle ? 0 : Math.max(0, Math.min(100, consumedPercent));
-  const filled = Math.round((util / 100) * SEGMENTS);
-  const key = `${status}:${filled}`;
+  const bucket = Math.round(util);
+  const key = `${isIdle ? 'idle' : status}:${bucket}`;
   const cached = ICON_CACHE.get(key);
   if (cached) return cached;
-  const img = renderBatteryBitmap((filled / SEGMENTS) * 100, status);
+  const img = renderBatteryBitmap(bucket, isIdle ? 'idle' : status);
   ICON_CACHE.set(key, img);
   return img;
 }
@@ -131,6 +208,7 @@ function describeNativeImage(img) {
       isEmpty: img.isEmpty(),
       width: size.width,
       height: size.height,
+      isTemplate: typeof img.isTemplateImage === 'function' ? img.isTemplateImage() : undefined,
     };
   } catch (e) {
     return { present: true, error: String(e) };
