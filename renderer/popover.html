@@ -362,6 +362,43 @@ details.troubleshoot[open] > summary .troubleshoot-chevron {
 }
 .troubleshoot-btn:hover { background: #3A3A3C; }
 
+.update-row {
+  margin: 14px 0 0;
+  padding: 10px 11px;
+  background: #1C1C1E;
+  border: 1px solid #2C2C2E;
+  border-radius: 8px;
+}
+.update-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.update-version {
+  font-size: 11px;
+  color: #AEAEB2;
+  font-variant-numeric: tabular-nums;
+}
+.update-action {
+  font-size: 11px;
+  color: #0A84FF;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+.update-action:hover { color: #64D2FF; }
+.update-action[hidden] { display: none; }
+.update-status {
+  font-size: 11px;
+  color: #8E8E93;
+  line-height: 1.35;
+}
+.update-status.ready { color: #34C759; }
+.update-status.error { color: #FF453A; }
+
 .settings-credit {
   padding: 8px 14px 14px;
   font-size: 10px;
@@ -493,6 +530,14 @@ details.troubleshoot[open] > summary .troubleshoot-chevron {
     <button type="submit" class="save-btn" id="saveBtn">Save &amp; Refresh</button>
     <div class="field-hint" style="margin-top:8px;text-align:center;">Press <strong>Enter</strong> or click the button — the <strong>←</strong> back arrow does not save.</div>
 
+    <div class="update-row" id="updateRow">
+      <div class="update-meta">
+        <span class="update-version" id="updateVersion">v—</span>
+        <button type="button" class="update-action" id="updateActionBtn" hidden>Restart now</button>
+      </div>
+      <div class="update-status" id="updateStatusText">Checking for updates…</div>
+    </div>
+
     <button type="button" class="quit-btn" id="quitBtn">Quit app</button>
 
     <details class="troubleshoot" id="troubleshootDetails">
@@ -518,7 +563,7 @@ details.troubleshoot[open] > summary .troubleshoot-chevron {
 </div>
 
 <script>
-const { ipcRenderer } = require('electron');
+const api = window.aiUsage;
 
 let currentState = {};
 let lastRenderSignature = null;
@@ -935,7 +980,7 @@ function resize(h) {
   const next = Math.round(h);
   if (next === lastResizeHeight) return;
   lastResizeHeight = next;
-  ipcRenderer.invoke('resize', next);
+  api.resize(next);
 }
 
 // ── Settings view ─────────────────────────────────────────────────────────────
@@ -979,7 +1024,7 @@ function formatDiagnostics(d) {
 }
 
 async function refreshSettingsDiagnostics() {
-  const d = await ipcRenderer.invoke('get-settings-diagnostics');
+  const d = await api.getSettingsDiagnostics();
   const pathsEl = document.getElementById('troubleshootPaths');
   const pre = document.getElementById('settingsTroubleshoot');
   pathsEl.innerHTML = '';
@@ -1060,7 +1105,7 @@ function showMain() {
 
 // ── IPC & events ──────────────────────────────────────────────────────────────
 
-ipcRenderer.on('usage-update', (_, state) => {
+api.onUsageUpdate((state) => {
   currentState = state;
   if (!document.getElementById('settingsView').classList.contains('visible')) {
     render(state);
@@ -1074,7 +1119,7 @@ ipcRenderer.on('usage-update', (_, state) => {
 document.getElementById('refreshBtn').addEventListener('click', async () => {
   const btn = document.getElementById('refreshBtn');
   btn.classList.add('spinning');
-  const state = await ipcRenderer.invoke('refresh');
+  const state = await api.refresh();
   if (state) { currentState = state; render(state); updateTimestamp(state); }
   btn.classList.remove('spinning');
 });
@@ -1083,14 +1128,14 @@ document.getElementById('settingsBtn').addEventListener('click', showSettings);
 document.getElementById('backBtn').addEventListener('click', showMain);
 
 document.getElementById('quitBtn').addEventListener('click', () => {
-  ipcRenderer.invoke('quit-app');
+  api.quit();
 });
 
 document.getElementById('refreshDiagnosticsBtn').addEventListener('click', async () => {
   const btn = document.getElementById('refreshDiagnosticsBtn');
   btn.disabled = true;
   try {
-    await ipcRenderer.invoke('refresh');
+    await api.refresh();
     await refreshSettingsDiagnostics();
   } finally {
     btn.disabled = false;
@@ -1098,7 +1143,7 @@ document.getElementById('refreshDiagnosticsBtn').addEventListener('click', async
 });
 
 document.getElementById('copyDiagnosticsBtn').addEventListener('click', async () => {
-  const d = await ipcRenderer.invoke('get-settings-diagnostics');
+  const d = await api.getSettingsDiagnostics();
   const header = [
     d.configPath ? `Config: ${d.configPath}` : '',
     d.debugLogPath ? `Debug log: ${d.debugLogPath}` : '',
@@ -1141,8 +1186,8 @@ async function saveSettingsAndClose() {
   incoming.hide_openai_gauge = !!gh.openai;
   incoming.hide_cursor_gauge = !!gh.cursor;
   incoming.hide_codex_gauge = !!gh.codex;
-  await ipcRenderer.invoke('set-config', incoming);
-  const state = await ipcRenderer.invoke('get-state');
+  await api.setConfig(incoming);
+  const state = await api.getState();
   if (state) currentState = state;
   await refreshSettingsDiagnostics();
   showMain();
@@ -1154,17 +1199,74 @@ document.getElementById('settingsForm').addEventListener('submit', (e) => {
   saveSettingsAndClose();
 });
 
+function renderUpdateStatus(u) {
+  if (!u) return;
+  const ver = document.getElementById('updateVersion');
+  const text = document.getElementById('updateStatusText');
+  const btn = document.getElementById('updateActionBtn');
+  if (!ver || !text || !btn) return;
+
+  ver.textContent = `v${u.currentVersion || '—'}`;
+  text.classList.remove('ready', 'error');
+  btn.hidden = true;
+  btn.textContent = 'Restart now';
+
+  switch (u.state) {
+    case 'dev':
+      text.textContent = 'Auto-update runs in packaged builds';
+      break;
+    case 'checking':
+      text.textContent = 'Checking for updates…';
+      break;
+    case 'available':
+    case 'downloading':
+      text.textContent = u.message || `Downloading ${u.latestVersion || 'update'}…`;
+      break;
+    case 'ready':
+      text.classList.add('ready');
+      text.textContent = u.latestVersion
+        ? `v${u.latestVersion} ready — restarts on Quit`
+        : 'Update ready — restarts on Quit';
+      btn.hidden = false;
+      break;
+    case 'up-to-date':
+      text.textContent = 'Up to date';
+      break;
+    case 'error':
+      text.classList.add('error');
+      text.textContent = u.message || 'Update check failed';
+      btn.hidden = false;
+      btn.textContent = 'Check again';
+      break;
+    default:
+      text.textContent = 'Updates check every few hours';
+  }
+}
+
+api.onUpdateStatus((u) => renderUpdateStatus(u));
+
+document.getElementById('updateActionBtn')?.addEventListener('click', async () => {
+  const u = await api.getUpdateStatus();
+  if (u?.state === 'ready') {
+    await api.installUpdate();
+    return;
+  }
+  renderUpdateStatus(await api.checkForUpdates());
+});
+
 // ── Init ──────────────────────────────────────────────────────────────────────
 
 (async () => {
-  const [state, config] = await Promise.all([
-    ipcRenderer.invoke('get-state'),
-    ipcRenderer.invoke('get-config'),
+  const [state, config, update] = await Promise.all([
+    api.getState(),
+    api.getConfig(),
+    api.getUpdateStatus(),
   ]);
 
   currentState = state;
   render(state);
   updateTimestamp(state);
+  renderUpdateStatus(update);
 
   // Pre-fill settings fields if keys exist (masked)
   if (config.claude_session_key) document.getElementById('claudeKey').value = '••••••••';
@@ -1186,8 +1288,8 @@ document.getElementById('settingsForm').addEventListener('submit', (e) => {
       const key = GAUGE_CONFIG_KEY[name];
       if (!key) return;
       const isHidden = !!(currentState.gaugeHidden || {})[name];
-      await ipcRenderer.invoke('set-config', { [key]: !isHidden });
-      const next = await ipcRenderer.invoke('get-state');
+      await api.setConfig({ [key]: !isHidden });
+      const next = await api.getState();
       if (next) {
         currentState = next;
         render(next);

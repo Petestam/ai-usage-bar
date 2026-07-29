@@ -1,4 +1,4 @@
-const { app, ipcMain } = require('electron');
+const { app, ipcMain, safeStorage } = require('electron');
 if (!app?.whenReady) {
   process.stderr.write(
     '[ai-usage-bar] Must be started with Electron (e.g. npm start), not plain Node.\n'
@@ -16,6 +16,7 @@ const {
   describeNativeImage,
   usageLabelForService,
 } = require('./icon');
+const { startUpdater, registerUpdaterIpc, onStatus } = require('./updater');
 
 function gaugeHiddenClaude() {
   return !!store?.get('hide_claude_gauge');
@@ -100,6 +101,10 @@ app.whenReady().then(() => {
   debug.log('app whenReady');
 
   store  = new Store();
+  debug.log(
+    'safeStorage encryption:',
+    typeof safeStorage?.isEncryptionAvailable === 'function' && safeStorage.isEncryptionAvailable()
+  );
   const idleIcon = createBatteryIcon(0, 'idle');
   debug.log('idle tray icon:', describeNativeImage(idleIcon));
 
@@ -112,8 +117,10 @@ app.whenReady().then(() => {
         height:    290,
         resizable: false,
         webPreferences: {
-          nodeIntegration:  true,
-          contextIsolation: false,
+          preload: path.join(__dirname, 'preload.js'),
+          nodeIntegration: false,
+          contextIsolation: true,
+          sandbox: true,
         },
       },
       preloadWindow: true,
@@ -177,6 +184,14 @@ app.whenReady().then(() => {
 
     poller.start();
     debug.log('poller started');
+
+    startUpdater({ log: (...a) => debug.log(...a) });
+    onStatus((update) => {
+      if (mb.window?.webContents) {
+        mb.window.webContents.send('update-status', update);
+      }
+    });
+    debug.log('updater started');
   });
 
   mb.on('after-create-window', () => {
@@ -197,7 +212,7 @@ app.whenReady().then(() => {
 
 ipcMain.handle('get-state', () => stateForRenderer());
 
-ipcMain.handle('get-config', () => store.getAll());
+ipcMain.handle('get-config', () => store.getPublic());
 
 ipcMain.handle('set-config', (_, incoming) => {
   const merged = { ...store.getAll(), ...incoming };
@@ -341,6 +356,8 @@ ipcMain.handle('resize', (_, height) => {
 ipcMain.handle('quit-app', () => {
   app.quit();
 });
+
+registerUpdaterIpc();
 
 // Prevent quitting when all windows close (menubar convention).
 app.on('window-all-closed', (e) => e.preventDefault());

@@ -1,12 +1,17 @@
 {
   "name": "ai-usage-bar",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "description": "Mac menubar app that tracks AI service usage limits",
   "author": "AI Usage Bar",
   "main": "main.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Petestam/ai-usage-bar.git"
+  },
   "scripts": {
     "start": "electron .",
     "build": "electron-builder --mac --universal --publish never",
+    "release": "electron-builder --mac --universal --publish always",
     "build:arm64": "electron-builder --mac --arm64",
     "build:x64": "electron-builder --mac --x64",
     "test:cursor": "node scripts/test-cursor-usage.js",
@@ -14,6 +19,7 @@
   },
   "dependencies": {
     "axios": "^1.6.0",
+    "electron-updater": "^6.8.9",
     "menubar": "^9.4.0"
   },
   "devDependencies": {
@@ -25,17 +31,29 @@
     "productName": "AI Usage",
     "mac": {
       "category": "public.app-category.productivity",
-      "target": ["dmg", "zip"]
+      "target": [
+        "dmg",
+        "zip"
+      ]
     },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Petestam",
+        "repo": "ai-usage-bar"
+      }
+    ],
     "directories": {
       "output": "dist"
     },
     "files": [
       "main.js",
+      "preload.js",
       "debug.js",
       "icon.js",
       "poller.js",
       "store.js",
+      "updater.js",
       "providers/**",
       "renderer/**",
       "node_modules/**"

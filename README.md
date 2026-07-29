@@ -141,7 +141,7 @@ Your keys and cookies stay **on your Mac** in:
 
 `~/Library/Application Support/AI Usage/ai-usage-config.json`
 
-Never share this file or paste it in public. Treat cookies like passwords.
+Secrets are encrypted with Electron `safeStorage` (macOS Keychain). Never share this file or paste it in public.
 
 ---
 
@@ -170,16 +170,22 @@ CODEX_TEST_COOKIE='paste cookie here' npm run test:codex
 
 ```bash
 npm install
+# Local artifacts only:
 npm run build
+
+# Or build + upload to GitHub Releases (needs GH_TOKEN with repo scope):
+npm run release
 ```
 
-Output: `dist/AI Usage-x.x.x-universal.dmg` and `.zip`.
+Output: `dist/AI Usage-x.x.x-universal.dmg`, `.zip`, plus `latest-mac.yml` (required for auto-update).
 
-**Publish:** bump `version` in `package.json`, commit, `git tag vX.Y.Z`, push, attach `dist/` artifacts to a GitHub Release.
+**Publish:** bump `version` in `package.json`, commit, `git tag vX.Y.Z`, push the tag, then `npm run release` (or attach the `dist/` zip, blockmap, and `latest-mac.yml` to the GitHub Release manually).
+
+**Auto-update:** packaged builds check GitHub Releases ~15s after launch, then every 4 hours. Updates download in the background and install on Quit (or **Settings → Restart now**).
 
 **Advanced config:** edit `poll_interval_ms` (default 90 seconds) or `hide_*_gauge` flags in the config JSON above. Paths are shown in **Settings → Troubleshooting**.
 
-**Code signing:** public builds are unsigned until a Developer ID + notarization pipeline is set up. See [electron.build code signing](https://www.electron.build/code-signing).
+**Code signing:** public builds are unsigned until a Developer ID + notarization pipeline is set up. Auto-update still works for users who already opened the app, but signing + notarization makes installs smoother. See [electron.build code signing](https://www.electron.build/code-signing).
 
 ---
 
