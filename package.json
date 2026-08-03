@@ -1,6 +1,6 @@
 {
   "name": "ai-usage-bar",
-  "version": "1.6.2",
+  "version": "1.6.3",
   "description": "Mac menubar app that tracks AI service usage limits",
   "author": "AI Usage Bar",
   "main": "main.js",

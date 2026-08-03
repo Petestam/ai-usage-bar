@@ -153,41 +153,50 @@ body {
   line-height: 1.4;
 }
 
-/* Compact rolling-day ledger under Codex bars */
+/* Codex rolling ledger — outlined day cells, height scales with usage */
 .ledger {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
-  gap: 0 2px;
-  margin: 5px 0 1px;
+  gap: 3px;
+  align-items: end;
+  margin: 6px 0 2px;
   padding-left: 60px;
   padding-right: 38px;
 }
 .ledger--hours {
-  grid-template-columns: repeat(auto-fit, minmax(22px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(24px, 1fr));
 }
 .ledger-cell {
-  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
   min-width: 0;
 }
-.ledger-pct {
-  font-size: 10px;
+.ledger-box {
+  width: 100%;
+  max-width: 28px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #3A3A3C;
+  border-radius: 3px;
+  background: transparent;
+  font-size: 9px;
   font-weight: 500;
-  line-height: 1.15;
   font-variant-numeric: tabular-nums;
-  color: #E5E5EA;
-}
-.ledger-pct.is-zero {
   color: #3A3A3C;
-  font-weight: 400;
+  line-height: 1;
+  transition: height 0.35s ease, border-color 0.2s ease, color 0.2s ease;
 }
-.ledger-pct.is-hot {
-  color: #FF9F0A;
+.ledger-cell.is-today .ledger-box:not(.has) {
+  border-color: #48484A;
 }
 .ledger-day {
   font-size: 8px;
-  line-height: 1.2;
+  line-height: 1;
   color: #48484A;
-  margin-top: 1px;
   letter-spacing: 0.02em;
 }
 .ledger-cell.is-today .ledger-day {
@@ -690,12 +699,36 @@ function ledgerDayLetter(startMs) {
   return new Date(startMs).toLocaleDateString(undefined, { weekday: 'narrow' });
 }
 
-function ledgerPctText(amount) {
-  const n = Math.round(Number(amount) || 0);
-  return n > 0 ? String(n) : '·';
+/** Base square → slightly taller as day util%-points rise (capped). */
+function ledgerBoxHeight(amount) {
+  const n = Math.max(0, Math.min(100, Number(amount) || 0));
+  return 20 + Math.round((n / 100) * 16); // 20–36px
 }
 
-/** Compact day/hour util%-point ledger under a Codex window. */
+/** Green → amber → red by day util%-points (same thresholds as main bars). */
+function ledgerUsageColor(amount) {
+  const n = Math.max(0, Math.min(100, Number(amount) || 0));
+  if (n <= 0) return null;
+  if (n < 50) {
+    // 1–49: green → amber
+    const t = (n - 1) / 48;
+    return lerpHex('#34C759', '#FF9500', t);
+  }
+  // 50–100: amber → red
+  const t = (n - 50) / 50;
+  return lerpHex('#FF9500', '#FF3B30', t);
+}
+
+function lerpHex(a, b, t) {
+  const p = Math.max(0, Math.min(1, t));
+  const parse = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+  const [ar, ag, ab] = parse(a);
+  const [br, bg, bb] = parse(b);
+  const hex = (n) => Math.round(n).toString(16).padStart(2, '0');
+  return `#${hex(ar + (br - ar) * p)}${hex(ag + (bg - ag) * p)}${hex(ab + (bb - ab) * p)}`;
+}
+
+/** Outlined day cells with % inside; empty days stay as quiet frames. */
 function codexLedgerRow(w) {
   const ledger = w.rollingLedger;
   if (!Array.isArray(ledger) || ledger.length < 2) return '';
@@ -707,13 +740,18 @@ function codexLedgerRow(w) {
 
   const cells = slots.map((b) => {
     const amt = Math.round(b.amount || 0);
-    const pctCls = amt >= 10 ? 'is-hot' : amt > 0 ? '' : 'is-zero';
+    const color = ledgerUsageColor(amt);
     const isToday = isDaily && b.start === todayMs;
     const day = isDaily
       ? ledgerDayLetter(b.start)
       : new Date(b.start).toLocaleTimeString(undefined, { hour: 'numeric' }).replace(/\s/g, '');
-    return `<div class="ledger-cell${isToday ? ' is-today' : ''}" title="${escapeHtml(day)}">
-      <div class="ledger-pct ${pctCls}">${ledgerPctText(amt)}</div>
+    const h = ledgerBoxHeight(amt);
+    const inner = amt > 0 ? String(amt) : '';
+    const style = color
+      ? `height:${h}px;border-color:${color};color:${color}`
+      : `height:${h}px`;
+    return `<div class="ledger-cell${isToday ? ' is-today' : ''}" title="${escapeHtml(day)}${amt ? ` · ${amt}%` : ''}">
+      <div class="ledger-box${amt > 0 ? ' has' : ''}" style="${style}">${inner}</div>
       <div class="ledger-day">${escapeHtml(day)}</div>
     </div>`;
   }).join('');
