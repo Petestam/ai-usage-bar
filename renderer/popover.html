@@ -153,6 +153,47 @@ body {
   line-height: 1.4;
 }
 
+/* Compact rolling-day ledger under Codex bars */
+.ledger {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 0 2px;
+  margin: 5px 0 1px;
+  padding-left: 60px;
+  padding-right: 38px;
+}
+.ledger--hours {
+  grid-template-columns: repeat(auto-fit, minmax(22px, 1fr));
+}
+.ledger-cell {
+  text-align: center;
+  min-width: 0;
+}
+.ledger-pct {
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+  color: #E5E5EA;
+}
+.ledger-pct.is-zero {
+  color: #3A3A3C;
+  font-weight: 400;
+}
+.ledger-pct.is-hot {
+  color: #FF9F0A;
+}
+.ledger-day {
+  font-size: 8px;
+  line-height: 1.2;
+  color: #48484A;
+  margin-top: 1px;
+  letter-spacing: 0.02em;
+}
+.ledger-cell.is-today .ledger-day {
+  color: #8E8E93;
+}
+
 /* ── Error state ─────────────────────────────────────── */
 .error-badge {
   font-size: 11px;
@@ -185,25 +226,35 @@ body {
 
 /* ── Settings view ───────────────────────────────────── */
 #settingsView { display: none; }
-#settingsView.visible { display: block; }
-#mainView.hidden { display: none; }
-
-/* Tall settings: cap window height and scroll the form (avoids clipping Quit / credit) */
-#settingsView.settings-view--clamped.visible {
+#settingsView.visible {
   display: flex;
   flex-direction: column;
   height: 100%;
   min-height: 0;
 }
-#settingsView.settings-view--clamped .settings-scroll {
+#mainView.hidden { display: none; }
+
+/* Fields scroll; Save / Quit stay pinned at the bottom */
+#settingsView.visible .settings-scroll {
   flex: 1 1 auto;
   min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
 }
+.settings-footer {
+  flex-shrink: 0;
+  padding: 10px 14px 12px;
+  border-top: 1px solid #2C2C2E;
+  background: #1C1C1E;
+}
+.settings-footer .save-btn { margin-top: 0; }
+.settings-footer .quit-btn { margin-top: 8px; }
+.settings-footer .settings-credit {
+  padding: 10px 0 0;
+}
 
-.settings-body { padding: 0 14px 14px; }
+.settings-body { padding: 0 14px 12px; }
 
 .field { margin-bottom: 11px; }
 
@@ -527,9 +578,6 @@ details.troubleshoot[open] > summary .troubleshoot-chevron {
       </div>
     </div>
 
-    <button type="submit" class="save-btn" id="saveBtn">Save &amp; Refresh</button>
-    <div class="field-hint" style="margin-top:8px;text-align:center;">Press <strong>Enter</strong> or click the button — the <strong>←</strong> back arrow does not save.</div>
-
     <div class="update-row" id="updateRow">
       <div class="update-meta">
         <span class="update-version" id="updateVersion">v—</span>
@@ -537,8 +585,6 @@ details.troubleshoot[open] > summary .troubleshoot-chevron {
       </div>
       <div class="update-status" id="updateStatusText">Checking for updates…</div>
     </div>
-
-    <button type="button" class="quit-btn" id="quitBtn">Quit app</button>
 
     <details class="troubleshoot" id="troubleshootDetails">
       <summary class="troubleshoot-summary">
@@ -555,10 +601,16 @@ details.troubleshoot[open] > summary .troubleshoot-chevron {
       </div>
     </details>
   </form>
-  <div class="settings-credit">
-    <span class="settings-credit-line">chiefpete @ nife</span>
-    <span class="settings-credit-slashes" aria-hidden="true">/////////////////////////</span>
   </div>
+
+  <div class="settings-footer">
+    <button type="submit" class="save-btn" id="saveBtn" form="settingsForm">Save &amp; Refresh</button>
+    <div class="field-hint" style="margin-top:8px;text-align:center;">Press <strong>Enter</strong> or click the button — the <strong>←</strong> back arrow does not save.</div>
+    <button type="button" class="quit-btn" id="quitBtn">Quit app</button>
+    <div class="settings-credit">
+      <span class="settings-credit-line">chiefpete @ nife</span>
+      <span class="settings-credit-slashes" aria-hidden="true">/////////////////////////</span>
+    </div>
   </div>
 </div>
 
@@ -580,14 +632,6 @@ function formatReset(date) {
   const m = Math.floor((ms % 3600000) / 60000);
   if (h >= 24) { const days = Math.floor(h / 24); return `resets in ${days}d ${h % 24}h`; }
   return h > 0 ? `resets in ${h}h ${m}m` : `resets in ${m}m`;
-}
-
-function formatDuration(seconds) {
-  const s = Math.max(0, Math.round(Number(seconds) || 0));
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  if (h >= 24) { const days = Math.floor(h / 24); return `${days}d ${h % 24}h`; }
-  return h > 0 ? `${h}h ${m}m` : `${m}m`;
 }
 
 function fillClass(util) {
@@ -642,46 +686,45 @@ function codexDisplayWindows(codex) {
   return rows;
 }
 
-/**
- * Rolling windows (esp. team weekly-only) free capacity continuously as older
- * usage ages out — "resets in 6d" is the full clear, not when you can use again.
- * When our poll-built estimator has a projection, prefer that.
- */
-function codexWindowNote(w, lastFetched) {
-  const util = w.utilization || 0;
-  const lim = Number(w.limitWindowSeconds);
-  const after = Number(w.resetAfterSeconds);
-  const isLong = Number.isFinite(lim) && lim >= 86400;
-  const rolling =
-    w.rolling ||
-    (isLong && Number.isFinite(after) && (Math.abs(lim - after) < 3600 || after / lim > 0.95));
+function ledgerDayLetter(startMs) {
+  return new Date(startMs).toLocaleDateString(undefined, { weekday: 'narrow' });
+}
 
-  const estMs = Number(w.estimatedRecoveryMs);
-  if (Number.isFinite(estMs) && estMs > Date.now()) {
-    const when = formatReset(new Date(estMs));
-    if (when) {
-      const to = w.estimatedToUtil != null ? ` → ~${w.estimatedToUtil}%` : '';
-      return `<div class="reset-label">est. ${when.replace(/^resets /, '')}${to}</div>`;
-    }
-  }
+function ledgerPctText(amount) {
+  const n = Math.round(Number(amount) || 0);
+  return n > 0 ? String(n) : '·';
+}
 
-  if (rolling && isLong && util < 75) {
-    const hint =
-      (w.rollingSampleCount || 0) < 2
-        ? 'rolling · learning from polls…'
-        : 'rolling · capacity frees as older usage ages out';
-    return `<div class="reset-label">${hint}</div>`;
-  }
-  if (rolling && isLong && util >= 75) {
-    const clear = formatDuration(after);
-    return `<div class="reset-label">rolling · full clear in ${clear} (partial recovery sooner)</div>`;
-  }
-  return resetLine(codexResetAt(w, lastFetched));
+/** Compact day/hour util%-point ledger under a Codex window. */
+function codexLedgerRow(w) {
+  const ledger = w.rollingLedger;
+  if (!Array.isArray(ledger) || ledger.length < 2) return '';
+  const isDaily = (w.limitWindowSeconds || 0) >= 86400;
+  const slots = isDaily ? ledger.slice(-7) : ledger.slice(-8);
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const todayMs = todayStart.getTime();
+
+  const cells = slots.map((b) => {
+    const amt = Math.round(b.amount || 0);
+    const pctCls = amt >= 10 ? 'is-hot' : amt > 0 ? '' : 'is-zero';
+    const isToday = isDaily && b.start === todayMs;
+    const day = isDaily
+      ? ledgerDayLetter(b.start)
+      : new Date(b.start).toLocaleTimeString(undefined, { hour: 'numeric' }).replace(/\s/g, '');
+    return `<div class="ledger-cell${isToday ? ' is-today' : ''}" title="${escapeHtml(day)}">
+      <div class="ledger-pct ${pctCls}">${ledgerPctText(amt)}</div>
+      <div class="ledger-day">${escapeHtml(day)}</div>
+    </div>`;
+  }).join('');
+  return `<div class="ledger${isDaily ? '' : ' ledger--hours'}">${cells}</div>`;
 }
 
 function codexWindowBlock(w, lastFetched) {
   const label = w.label || 'Limit';
-  return `${progressRow(label, w.utilization || 0)}${codexWindowNote(w, lastFetched)}`;
+  const ledger = codexLedgerRow(w);
+  if (ledger) return `${progressRow(label, w.utilization || 0)}${ledger}`;
+  return `${progressRow(label, w.utilization || 0)}${resetLine(codexResetAt(w, lastFetched))}`;
 }
 
 /** Cursor on-demand spend (USD) when API includes spendLimitUsage */
@@ -1042,27 +1085,22 @@ async function refreshSettingsDiagnostics() {
   resizeSettingsWindow();
 }
 
-/** Size the popover to fit the settings form, or cap height and scroll inside. */
+/** Size settings to content, capped so the pinned footer (Save / Quit) always stays on screen. */
 function resizeSettingsWindow() {
   const sv = document.getElementById('settingsView');
   if (!sv.classList.contains('visible')) return;
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
       const header = sv.querySelector('.header');
+      const footer = sv.querySelector('.settings-footer');
       const scrollEl = document.getElementById('settingsScroll');
       const headerH = header ? header.offsetHeight : 44;
-      const maxWin = Math.max(440, Math.floor(window.screen.availHeight * 0.88));
-      scrollEl.style.maxHeight = '';
-      sv.classList.remove('settings-view--clamped');
-      const contentH = scrollEl.scrollHeight;
-      const naturalTotal = headerH + contentH + 2;
-      if (naturalTotal > maxWin) {
-        sv.classList.add('settings-view--clamped');
-        resize(maxWin);
-        scrollEl.style.maxHeight = `${maxWin - headerH}px`;
-      } else {
-        resize(Math.max(naturalTotal, 320));
-      }
+      const footerH = footer ? footer.offsetHeight : 120;
+      // Stay under main-process workArea cap (~92%) with headroom for the menubar.
+      const maxWin = Math.max(420, Math.min(720, Math.floor(window.screen.availHeight * 0.72)));
+      const contentH = scrollEl ? scrollEl.scrollHeight : 0;
+      const naturalTotal = headerH + contentH + footerH + 2;
+      resize(Math.min(Math.max(naturalTotal, 360), maxWin));
     });
   });
 }

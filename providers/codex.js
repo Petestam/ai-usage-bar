@@ -172,7 +172,7 @@ class CodexProvider {
     return `${w.label || 'window'}:${w.limitWindowSeconds || 0}`;
   }
 
-  /** Observe util + attach estimatedRecoveryMs when we can project a drop. */
+  /** Observe util + attach estimated recovery + day/hour ledger. */
   _applyRolling(windows, nowMs) {
     if (!Array.isArray(windows)) return;
     let dirty = false;
@@ -187,15 +187,18 @@ class CodexProvider {
       est.observe(w.utilization ?? 0, nowMs);
       dirty = true;
 
+      const ledger = est.ledger(nowMs);
+      w.rollingLedger = ledger;
+      w.rollingSampleCount = ledger.filter((b) => b.amount > 0).length;
+
       const eta = est.etaDrop({ dropPoints: 1, nowMs });
       if (eta && eta.at > nowMs) {
         w.estimatedRecoveryMs = eta.at;
         w.estimatedFromUtil = Math.round(eta.fromUtil);
         w.estimatedToUtil = Math.round(Math.max(0, eta.toUtil));
-        w.rollingSampleCount = est.events.length;
+        w.estimatedDropAmount = Math.round(eta.dropAmount * 10) / 10;
       } else {
         w.estimatedRecoveryMs = null;
-        w.rollingSampleCount = est.events.length;
       }
     }
     if (dirty) this._saveEstimators();

@@ -1,4 +1,4 @@
-const { app, ipcMain, safeStorage } = require('electron');
+const { app, ipcMain, Menu, safeStorage } = require('electron');
 if (!app?.whenReady) {
   process.stderr.write(
     '[ai-usage-bar] Must be started with Electron (e.g. npm start), not plain Node.\n'
@@ -147,6 +147,24 @@ app.whenReady().then(() => {
       mb.tray.setTitle('');
     }
     lastTrayTitle = '';
+
+    // Right-click only — setContextMenu also fires on left-click with menubar.
+    const trayMenu = Menu.buildFromTemplate([
+      {
+        label: 'Refresh',
+        click: () => {
+          poller?.poll().catch((e) => debug.logError('tray refresh', e));
+        },
+      },
+      { type: 'separator' },
+      {
+        label: 'Quit',
+        click: () => app.quit(),
+      },
+    ]);
+    mb.tray.on('right-click', (_event, bounds) => {
+      mb.tray.popUpContextMenu(trayMenu, bounds);
+    });
 
     poller = new Poller(store, (state) => {
       // Update tray icon with the active service's capacity ring + in-icon %.
