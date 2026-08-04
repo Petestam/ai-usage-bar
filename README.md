@@ -185,7 +185,7 @@ Output: `dist/AI Usage-x.x.x-universal.dmg`, `.zip`, plus `latest-mac.yml` (requ
 
 **Advanced config:** edit `poll_interval_ms` (default 90 seconds) or `hide_*_gauge` flags in the config JSON above. Paths are shown in **Settings → Troubleshooting**.
 
-**Code signing:** public builds are unsigned until a Developer ID + notarization pipeline is set up. Auto-update still works for users who already opened the app, but signing + notarization makes installs smoother. See [electron.build code signing](https://www.electron.build/code-signing).
+**Code signing:** public builds are unsigned until a Developer ID + notarization pipeline is set up. Auto-update skips signature checks for now (`verifyUpdateCodeSignature = false`); signing + notarization will make installs smoother and let that check turn back on. See [electron.build code signing](https://www.electron.build/code-signing).
 
 ---
 

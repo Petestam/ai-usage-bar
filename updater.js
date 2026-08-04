@@ -82,6 +82,9 @@ function startUpdater({ log = () => {} } = {}) {
   }
 
   const { autoUpdater } = require('electron-updater');
+  // Releases are unsigned until Developer ID + notarization is set up.
+  // ShipIt rejects unsigned updates unless this is disabled.
+  autoUpdater.verifyUpdateCodeSignature = false;
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
   autoUpdater.logger = {
