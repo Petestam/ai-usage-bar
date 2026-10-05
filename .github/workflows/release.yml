@@ -20,6 +20,10 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
+      - name: Remove the previous draft so assets can be uploaded again
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release delete "${GITHUB_REF_NAME}" --yes || true
       - name: Build and publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
