@@ -1,4 +1,6 @@
 const { app, ipcMain } = require('electron');
+const { spawn } = require('child_process');
+const path = require('path');
 
 const CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000; // every 4 hours
 const STARTUP_DELAY_MS = 15_000;
@@ -14,6 +16,39 @@ let status = {
 let listeners = [];
 let checkTimer = null;
 let started = false;
+let macUpdateZip = null;
+let macInstallStarted = false;
+
+// Squirrel.Mac validates the new app with kSecCSStrictValidate, which rejects
+// an unsigned or ad-hoc bundle ("code object is not signed at all"). That check
+// cannot be turned off. On Mac we download with electron-updater, then swap the
+// .app ourselves after quit.
+const MAC_INSTALL_SCRIPT = `set -euo pipefail
+LOG="$HOME/Library/Logs/ai-usage-update.log"
+mkdir -p "$(dirname "$LOG")"
+exec >> "$LOG" 2>&1
+echo "--- $(date) replacing $APP_BUNDLE ---"
+while kill -0 "$APP_PID" 2>/dev/null; do sleep 0.2; done
+TMP=$(mktemp -d)
+ditto -x -k "$UPDATE_ZIP" "$TMP"
+NEW=$(find "$TMP" -maxdepth 2 -name '*.app' -print -quit || true)
+if [ -z "$NEW" ]; then
+  echo "no .app in $UPDATE_ZIP"
+  rm -rf "$TMP"
+  exit 1
+fi
+BACKUP="\${APP_BUNDLE}.previous"
+rm -rf "$BACKUP"
+mv "$APP_BUNDLE" "$BACKUP"
+if ! mv "$NEW" "$APP_BUNDLE"; then
+  mv "$BACKUP" "$APP_BUNDLE"
+  rm -rf "$TMP"
+  exit 1
+fi
+rm -rf "$BACKUP" "$TMP"
+xattr -dr com.apple.quarantine "$APP_BUNDLE" || true
+open "$APP_BUNDLE"
+`;
 
 function currentVersion() {
   try {
@@ -63,8 +98,36 @@ async function checkNow() {
   }
 }
 
+function appBundlePath() {
+  // .../AI Usage.app/Contents/MacOS/AI Usage → .../AI Usage.app
+  return path.resolve(app.getPath('exe'), '..', '..', '..');
+}
+
+function installMacUpdate() {
+  if (!macUpdateZip || macInstallStarted) return;
+  const bundle = appBundlePath();
+  if (!bundle.endsWith('.app')) return;
+  macInstallStarted = true;
+  const child = spawn('/bin/bash', ['-c', MAC_INSTALL_SCRIPT], {
+    detached: true,
+    stdio: 'ignore',
+    env: {
+      ...process.env,
+      UPDATE_ZIP: macUpdateZip,
+      APP_BUNDLE: bundle,
+      APP_PID: String(process.pid),
+    },
+  });
+  child.unref();
+  app.exit(0);
+}
+
 function quitAndInstall() {
   if (!app.isPackaged) return;
+  if (process.platform === 'darwin') {
+    installMacUpdate();
+    return;
+  }
   const { autoUpdater } = require('electron-updater');
   // isSilent, isForceRunAfter
   autoUpdater.quitAndInstall(false, true);
@@ -82,11 +145,19 @@ function startUpdater({ log = () => {} } = {}) {
   }
 
   const { autoUpdater } = require('electron-updater');
-  // Releases are unsigned until Developer ID + notarization is set up.
-  // ShipIt rejects unsigned updates unless this is disabled.
+  // Squirrel.Mac still rejects unsigned bundles. Mac installs swap the .app
+  // after quit instead of calling ShipIt. Windows keeps electron-updater's installer.
   autoUpdater.verifyUpdateCodeSignature = false;
   autoUpdater.autoDownload = true;
-  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.autoInstallOnAppQuit = process.platform !== 'darwin';
+  if (process.platform === 'darwin') {
+    app.on('before-quit', (event) => {
+      if (!macUpdateZip || macInstallStarted) return;
+      if (!appBundlePath().endsWith('.app')) return;
+      event.preventDefault();
+      installMacUpdate();
+    });
+  }
   autoUpdater.logger = {
     info: (...a) => log('[updater]', ...a),
     warn: (...a) => log('[updater:warn]', ...a),
@@ -125,6 +196,9 @@ function startUpdater({ log = () => {} } = {}) {
   });
 
   autoUpdater.on('update-downloaded', (info) => {
+    if (process.platform === 'darwin' && info?.downloadedFile) {
+      macUpdateZip = info.downloadedFile;
+    }
     setStatus({
       state: 'ready',
       latestVersion: info?.version || status.latestVersion,
