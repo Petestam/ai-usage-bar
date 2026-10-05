@@ -17,6 +17,7 @@ const {
   usageLabelForService,
 } = require('./icon');
 const { startUpdater, registerUpdaterIpc, onStatus } = require('./updater');
+const { beginSignIn } = require('./providers/cookie-login');
 
 function gaugeHiddenClaude() {
   return !!store?.get('hide_claude_gauge');
@@ -354,6 +355,27 @@ ipcMain.handle('get-settings-diagnostics', () => {
       codex: svc(st.codex),
     },
   };
+});
+
+ipcMain.handle('sign-in', async (_event, serviceId) => {
+  if (!store) return { status: 'error' };
+  return beginSignIn(serviceId, async (configKey, cookieHeader) => {
+    const merged = { ...store.getAll(), [configKey]: cookieHeader };
+    if (configKey === 'claude_session_key') {
+      delete merged.claude_org_uuid;
+      if (poller?.claude) poller.claude.orgUuid = null;
+    }
+    store.setAll(merged);
+    debug.logSettings('sign-in', configKey, `saved (length ${cookieHeader.length})`);
+    await poller?.poll();
+    try {
+      if (mb?.window && !mb.window.isDestroyed()) {
+        mb.window.webContents.send('usage-update', stateForRenderer());
+      }
+    } catch (e) {
+      debug.logError('sign-in usage-update', e);
+    }
+  });
 });
 
 ipcMain.handle('refresh', async () => {

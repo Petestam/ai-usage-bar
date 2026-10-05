@@ -4,6 +4,7 @@ contextBridge.exposeInMainWorld('aiUsage', {
   getState: () => ipcRenderer.invoke('get-state'),
   getConfig: () => ipcRenderer.invoke('get-config'),
   setConfig: (cfg) => ipcRenderer.invoke('set-config', cfg),
+  signIn: (service) => ipcRenderer.invoke('sign-in', service),
   refresh: () => ipcRenderer.invoke('refresh'),
   resize: (height) => ipcRenderer.invoke('resize', height),
   quit: () => ipcRenderer.invoke('quit-app'),

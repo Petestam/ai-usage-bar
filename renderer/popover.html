@@ -313,6 +313,32 @@ body {
   text-decoration: underline;
 }
 
+.field-signin {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+.signin-btn {
+  background: #2C2C2E;
+  color: #FFFFFF;
+  border: 1px solid #3A3A3C;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.signin-btn:hover { border-color: #0A84FF; }
+.signin-btn:disabled { opacity: 0.55; cursor: default; }
+.signin-status {
+  font-size: 10px;
+  color: #8E8E93;
+  line-height: 1.3;
+}
+.signin-status.saved { color: #30D158; }
+.signin-status.error { color: #FF453A; }
+
 .save-btn {
   width: 100%;
   background: #0A84FF;
@@ -530,7 +556,11 @@ details.troubleshoot[open] > summary .troubleshoot-chevron {
     <div class="field">
       <label>Claude Session Key</label>
       <input type="password" id="claudeKey" placeholder="sessionKey or full Cookie header" autocomplete="off" spellcheck="false"/>
-      <div class="field-hint">Best: Network → request → Request Headers → <strong>cookie</strong>. If you copy from Application → Cookies, include the whole row — the app strips extra fields like Domain/expires/Path. Or paste only the token after <strong>sessionKey=</strong>.</div>
+      <div class="field-signin">
+        <button type="button" class="signin-btn" data-signin="claude" data-status="signInStatusClaude">Sign in</button>
+        <span class="signin-status" id="signInStatusClaude"></span>
+      </div>
+      <div class="field-hint">Click <strong>Sign in</strong> and log in at claude.ai — the app saves the session cookie. Or paste the <strong>cookie</strong> header from DevTools → Network.</div>
       <div class="field-gauge">
         <button type="button" class="gauge-link" data-gauge="claude" id="gaugeToggleClaude">hide</button>
       </div>
@@ -572,7 +602,11 @@ details.troubleshoot[open] > summary .troubleshoot-chevron {
     <div class="field">
       <label>Cursor session (cookie)</label>
       <input type="password" id="cursorCookie" placeholder="Full cookie header or Workos token" autocomplete="off" spellcheck="false"/>
-      <div class="field-hint">cursor.com → DevTools → Network → request to <strong>cursor.com</strong> → copy the full <strong>cookie</strong> request header. Needs <code>WorkosCursorSessionToken</code> or session cookies.</div>
+      <div class="field-signin">
+        <button type="button" class="signin-btn" data-signin="cursor" data-status="signInStatusCursor">Sign in</button>
+        <span class="signin-status" id="signInStatusCursor"></span>
+      </div>
+      <div class="field-hint">Click <strong>Sign in</strong> and log in at cursor.com. Or paste the <strong>cookie</strong> header. Needs <code>WorkosCursorSessionToken</code>.</div>
       <div class="field-gauge">
         <button type="button" class="gauge-link" data-gauge="cursor" id="gaugeToggleCursor">hide</button>
       </div>
@@ -581,7 +615,11 @@ details.troubleshoot[open] > summary .troubleshoot-chevron {
     <div class="field">
       <label>Codex / ChatGPT session (cookie)</label>
       <input type="password" id="codexCookie" placeholder="Full cookie header or session token" autocomplete="off" spellcheck="false"/>
-      <div class="field-hint">chatgpt.com → DevTools → Network → any request → copy the full <strong>cookie</strong> header. Needs <code>__Secure-next-auth.session-token</code> (often sharded as <code>.0</code> and <code>.1</code>). Covers Codex CLI, IDE extension, and ChatGPT Work limits.</div>
+      <div class="field-signin">
+        <button type="button" class="signin-btn" data-signin="codex" data-status="signInStatusCodex">Sign in</button>
+        <span class="signin-status" id="signInStatusCodex"></span>
+      </div>
+      <div class="field-hint">Click <strong>Sign in</strong> and log in at chatgpt.com. Or paste the <strong>cookie</strong> header. Needs <code>__Secure-next-auth.session-token</code> (often <code>.0</code> and <code>.1</code>). Covers Codex and ChatGPT Work.</div>
       <div class="field-gauge">
         <button type="button" class="gauge-link" data-gauge="codex" id="gaugeToggleCodex">hide</button>
       </div>
@@ -1357,6 +1395,48 @@ document.getElementById('updateActionBtn')?.addEventListener('click', async () =
   if (config.codex_cookie) document.getElementById('codexCookie').value = '••••••••';
 
   syncGaugeToggleLabels();
+
+  const signInFields = { claude: 'claudeKey', cursor: 'cursorCookie', codex: 'codexCookie' };
+  document.querySelectorAll('.signin-btn[data-signin]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const service = btn.getAttribute('data-signin');
+      const status = document.getElementById(btn.getAttribute('data-status'));
+      btn.disabled = true;
+      if (status) {
+        status.className = 'signin-status';
+        status.textContent = 'Waiting for login…';
+      }
+      try {
+        const result = await api.signIn(service);
+        if (result?.status === 'saved') {
+          const input = document.getElementById(signInFields[service]);
+          if (input) input.value = '••••••••';
+          if (status) {
+            status.classList.add('saved');
+            status.textContent = 'Saved';
+          }
+          const state = await api.getState();
+          if (state) {
+            currentState = state;
+            updateTimestamp(state);
+          }
+        } else if (result?.status === 'closed') {
+          if (status) status.textContent = 'Closed before login';
+        } else if (status) {
+          status.classList.add('error');
+          status.textContent = 'Could not sign in';
+        }
+      } catch (e) {
+        console.error(e);
+        if (status) {
+          status.classList.add('error');
+          status.textContent = 'Could not sign in';
+        }
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  });
 
   document.querySelectorAll('.gauge-link[data-gauge]').forEach((btn) => {
     btn.addEventListener('click', async () => {
