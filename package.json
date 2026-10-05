@@ -40,7 +40,8 @@
       {
         "provider": "github",
         "owner": "Petestam",
-        "repo": "ai-usage-bar"
+        "repo": "ai-usage-bar",
+        "releaseType": "release"
       }
     ],
     "directories": {
