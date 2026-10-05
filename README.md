@@ -28,9 +28,9 @@ xattr -dr com.apple.quarantine "/Applications/AI Usage.app"
 
 ### 2. Connect the services you use
 
-On first launch, **Settings** opens automatically. You only need to fill in the services you actually use — leave the rest blank.
+On first launch, **Settings** opens automatically. You only need to connect the services you actually use — leave the rest blank.
 
-Click **Save & Refresh** when done (the ← back arrow does **not** save).
+For Claude, Cursor, and Codex, click **Sign in**. For OpenAI, paste an API key. **Sign in** saves that cookie on its own. If you typed or pasted anything, click **Save & Refresh** (the ← back arrow does **not** save).
 
 ### 3. You’re done
 
@@ -40,38 +40,40 @@ A battery icon appears in your menu bar. The number beside it is your current us
 
 ## Connect your services
 
-### Claude, Cursor, or Codex — one copy-paste method
+### Claude, Cursor, or Codex — Sign in
 
-These three work the same way: log into the website in your browser, copy one line, paste into Settings.
+These three work the same way. You log in once in a window the app opens; it reads the session cookie and saves it.
 
 **Do this once per service:**
 
-1. Open the site in **Chrome** or **Safari** and make sure you’re logged in:
-   - Claude → [claude.ai](https://claude.ai)
-   - Cursor → [cursor.com](https://cursor.com)
-   - Codex → [chatgpt.com](https://chatgpt.com)
+1. Open **Settings**.
+2. Click **Sign in** under the service.
+3. Log in in the window that opens. When the session cookie is there, the app saves it, refreshes, and closes the window.
+
+| Service | Settings field | Sign-in site |
+|---------|----------------|--------------|
+| Claude | **Claude Session Key** | [claude.ai](https://claude.ai) |
+| Cursor | **Cursor session (cookie)** | [cursor.com](https://cursor.com) |
+| Codex / ChatGPT Work | **Codex / ChatGPT session (cookie)** | [chatgpt.com](https://chatgpt.com) |
+
+**Codex** and **ChatGPT Work** share the same limit; one chatgpt.com sign-in covers both.
+
+**Claude only:** if the app can’t find your usage, paste your **organization ID** (optional field) — the UUID from your claude.ai usage URL.
+
+**If Sign in does not work,** paste a cookie instead:
+
+1. Open the site in **Chrome** or **Safari** while logged in.
 2. Open the page inspector:
    - **Chrome:** `View → Developer → Developer Tools` (or `⌥⌘I`)
    - **Safari:** enable **Develop** menu in Settings → Advanced, then **Develop → Show Web Inspector**
 3. Click the **Network** tab, then **reload the page**.
-4. Click any row in the list (anything from that site).
-5. In the right panel, find **Request Headers → cookie** and **copy the whole value** — the long line starting with things like `sessionKey=` or `WorkosCursorSessionToken=`.
-6. In AI Usage **Settings**, paste into the matching field and click **Save & Refresh**.
+4. Click any row from that site.
+5. Copy **Request Headers → cookie** (the whole value).
+6. Paste into the matching Settings field and click **Save & Refresh**.
 
-| Service | Settings field |
-|---------|----------------|
-| Claude | **Claude Session Key** |
-| Cursor | **Cursor session (cookie)** |
-| Codex / ChatGPT Work | **Codex / ChatGPT session (cookie)** |
+The app accepts a full cookie line, a DevTools cookie row (it strips `Domain` / `expires` / `Path`), or a single token.
 
-**Tips for best results**
-
-- Copy the **full cookie line** from the Network tab — not just one cookie name from the Cookies list. This avoids most “session expired” or connection errors.
-- You can paste the whole DevTools cookie row even if it includes extra bits like `Domain=` — the app cleans that up.
-- **Codex** and **ChatGPT Work** share the same limit; one chatgpt.com cookie covers both.
-- **Claude only:** if the app can’t find your usage, paste your **organization ID** (optional field) — the UUID from your claude.ai usage URL.
-
-**When to refresh your cookie:** every few weeks, or whenever the app shows **Session expired — update in Settings**. Log in again in the browser and repeat the copy-paste.
+**When to sign in again:** every few weeks, or whenever the app shows **Session expired — update in Settings**. Click **Sign in** again.
 
 ---
 
@@ -125,11 +127,11 @@ In Settings, each service has a **hide / show** link under its field. Hidden ser
 
 | What you see | Fix |
 |--------------|-----|
-| **Session expired** | Log into the website again, copy a fresh cookie (full Network tab line), paste in Settings, **Save & Refresh**. |
+| **Session expired** | Click **Sign in** for that service and log in again. Or paste a fresh cookie (full Network tab line) and **Save & Refresh**. |
 | **Connection error** | Check you’re online. Try **↻ Refresh**. Open **Settings → Troubleshooting** for details. |
 | **macOS won’t open the app** | Right-click → **Open**, or **System Settings → Privacy & Security → Open Anyway**. |
 | **Nothing saves** | Click **Save & Refresh** — not the back arrow. If a field shows `••••••••`, paste a **new** value to replace it. |
-| **Claude works in browser but not in app** | Use the full **cookie** header from Network (not just `sessionKey`). Add **organization ID** if needed. |
+| **Claude works in browser but not in app** | Click **Sign in** again, or paste the full **cookie** header from Network (not just `sessionKey`). Add **organization ID** if needed. |
 
 **Settings → Troubleshooting** shows error logs and a **Copy all** button if you need to debug further.
 
@@ -179,7 +181,7 @@ npm run release
 
 Output: `dist/AI Usage-x.x.x-universal.dmg`, `.zip`, plus `latest-mac.yml` (required for auto-update).
 
-**Publish:** bump `version` in `package.json`, commit, `git tag vX.Y.Z`, push the tag, then `npm run release` (or attach the `dist/` zip, blockmap, and `latest-mac.yml` to the GitHub Release manually).
+**Publish:** bump `version` in `package.json`, commit, `git tag vX.Y.Z`, and push the tag. That tag starts the macOS release workflow, which builds the universal app and uploads the zip, blockmap, and `latest-mac.yml` to GitHub Releases. You can still build and upload locally with `npm run release` (needs `GH_TOKEN` with repo scope).
 
 **Auto-update:** packaged builds check GitHub Releases ~15s after launch, then every 4 hours. Updates download in the background and install on Quit (or **Settings → Restart now**).
 

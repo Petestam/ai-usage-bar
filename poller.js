@@ -20,8 +20,12 @@ class Poller {
   }
 
   async poll() {
-    if (this._pollInFlight) return;
-    this._pollInFlight = true;
+    // A sign-in can land while a poll is already reading the old cookie.
+    // Wait for that pass, then run again so the new credential is used.
+    while (this._pollInFlight) await this._pollInFlight;
+    let release;
+    const gate = new Promise((resolve) => { release = resolve; });
+    this._pollInFlight = gate;
     try {
       const [c, o, u, x] = await Promise.allSettled([
         this.store.get('claude_session_key') || this.store.get('anthropic_admin_api_key')
@@ -37,7 +41,8 @@ class Poller {
       if (x.status === 'fulfilled' && x.value) this.state.codex = x.value;
       this.onUpdate(this.state);
     } finally {
-      this._pollInFlight = false;
+      this._pollInFlight = null;
+      release();
     }
   }
 
