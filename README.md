@@ -181,7 +181,7 @@ npm run release
 
 Output: `dist/AI Usage-x.x.x-universal.dmg`, `.zip`, plus `latest-mac.yml` (required for auto-update).
 
-**Publish:** bump `version` in `package.json`, commit, `git tag vX.Y.Z`, push the tag, then `npm run release` (or attach the `dist/` zip, blockmap, and `latest-mac.yml` to the GitHub Release manually).
+**Publish:** bump `version` in `package.json`, commit, `git tag vX.Y.Z`, and push the tag. That tag starts the macOS release workflow, which builds the universal app and uploads the zip, blockmap, and `latest-mac.yml` to GitHub Releases. You can still build and upload locally with `npm run release` (needs `GH_TOKEN` with repo scope).
 
 **Auto-update:** packaged builds check GitHub Releases ~15s after launch, then every 4 hours. Updates download in the background and install on Quit (or **Settings → Restart now**).
 
