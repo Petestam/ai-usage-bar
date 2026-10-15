@@ -359,6 +359,12 @@ ipcMain.handle('get-settings-diagnostics', () => {
 
 ipcMain.handle('sign-in', async (_event, serviceId) => {
   if (!store) return { status: 'error' };
+  const storedKey = {
+    claude: 'claude_session_key',
+    cursor: 'cursor_cookie',
+    codex: 'codex_cookie',
+  }[serviceId];
+  const existing = storedKey ? store.get(storedKey) || '' : '';
   return beginSignIn(serviceId, async (configKey, cookieHeader) => {
     const merged = { ...store.getAll(), [configKey]: cookieHeader };
     if (configKey === 'claude_session_key') {
@@ -368,14 +374,17 @@ ipcMain.handle('sign-in', async (_event, serviceId) => {
     store.setAll(merged);
     debug.logSettings('sign-in', configKey, `saved (length ${cookieHeader.length})`);
     await poller?.poll();
+    const state = stateForRenderer();
     try {
       if (mb?.window && !mb.window.isDestroyed()) {
-        mb.window.webContents.send('usage-update', stateForRenderer());
+        mb.window.webContents.send('usage-update', state);
       }
     } catch (e) {
       debug.logError('sign-in usage-update', e);
     }
-  });
+    const svc = state[serviceId];
+    return { error: svc?.error || null, errorDetail: svc?.errorDetail || null };
+  }, existing);
 });
 
 ipcMain.handle('refresh', async () => {

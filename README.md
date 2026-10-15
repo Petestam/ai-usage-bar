@@ -73,7 +73,7 @@ These three work the same way. You log in once in a window the app opens; it rea
 
 The app accepts a full cookie line, a DevTools cookie row (it strips `Domain` / `expires` / `Path`), or a single token.
 
-**When to sign in again:** every few weeks, or whenever the app shows **Session expired — update in Settings**. Click **Sign in** again.
+**When to sign in again:** every few weeks, or whenever the app shows **Session expired — update in Settings**. Click **Sign in** and finish logging in in the window that opens. If that account was already signed in there, the window stays open until ChatGPT issues a new session cookie. **Saved** means the new cookie was accepted.
 
 ---
 
