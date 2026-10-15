@@ -560,7 +560,7 @@ details.troubleshoot[open] > summary .troubleshoot-chevron {
         <button type="button" class="signin-btn" data-signin="claude" data-status="signInStatusClaude">Sign in</button>
         <span class="signin-status" id="signInStatusClaude"></span>
       </div>
-      <div class="field-hint">Click <strong>Sign in</strong> and log in at claude.ai — the app saves the session cookie. Or paste the <strong>cookie</strong> header from DevTools → Network.</div>
+      <div class="field-hint">Click <strong>Sign in</strong> and finish logging in in the window that opens. An expired session is not saved again. Or paste the <strong>cookie</strong> header from DevTools → Network.</div>
       <div class="field-gauge">
         <button type="button" class="gauge-link" data-gauge="claude" id="gaugeToggleClaude">hide</button>
       </div>
@@ -606,7 +606,7 @@ details.troubleshoot[open] > summary .troubleshoot-chevron {
         <button type="button" class="signin-btn" data-signin="cursor" data-status="signInStatusCursor">Sign in</button>
         <span class="signin-status" id="signInStatusCursor"></span>
       </div>
-      <div class="field-hint">Click <strong>Sign in</strong> and log in at cursor.com. Or paste the <strong>cookie</strong> header. Needs <code>WorkosCursorSessionToken</code>.</div>
+      <div class="field-hint">Click <strong>Sign in</strong> and finish logging in in the window that opens. An expired session is not saved again. Or paste the <strong>cookie</strong> header. Needs <code>WorkosCursorSessionToken</code>.</div>
       <div class="field-gauge">
         <button type="button" class="gauge-link" data-gauge="cursor" id="gaugeToggleCursor">hide</button>
       </div>
@@ -619,7 +619,7 @@ details.troubleshoot[open] > summary .troubleshoot-chevron {
         <button type="button" class="signin-btn" data-signin="codex" data-status="signInStatusCodex">Sign in</button>
         <span class="signin-status" id="signInStatusCodex"></span>
       </div>
-      <div class="field-hint">Click <strong>Sign in</strong> and log in at chatgpt.com. Or paste the <strong>cookie</strong> header. Needs <code>__Secure-next-auth.session-token</code> (often <code>.0</code> and <code>.1</code>). Covers Codex and ChatGPT Work.</div>
+          <div class="field-hint">Click <strong>Sign in</strong> and finish logging in in the window that opens. An expired session is not saved again. Or paste the <strong>cookie</strong> header. Needs <code>__Secure-next-auth.session-token</code> (often <code>.0</code> and <code>.1</code>). Covers Codex and ChatGPT Work.</div>
       <div class="field-gauge">
         <button type="button" class="gauge-link" data-gauge="codex" id="gaugeToggleCodex">hide</button>
       </div>
@@ -1411,14 +1411,24 @@ document.getElementById('updateActionBtn')?.addEventListener('click', async () =
         if (result?.status === 'saved') {
           const input = document.getElementById(signInFields[service]);
           if (input) input.value = '••••••••';
-          if (status) {
-            status.classList.add('saved');
-            status.textContent = 'Saved';
-          }
           const state = await api.getState();
           if (state) {
             currentState = state;
             updateTimestamp(state);
+            if (!document.getElementById('settingsView').classList.contains('visible')) {
+              render(state);
+            }
+          }
+          if (status) {
+            if (result.error) {
+              status.classList.add('error');
+              status.textContent = result.error === 'auth_expired'
+                ? 'Session still expired'
+                : 'Saved, refresh failed';
+            } else {
+              status.classList.add('saved');
+              status.textContent = 'Saved';
+            }
           }
         } else if (result?.status === 'closed') {
           if (status) status.textContent = 'Closed before login';
